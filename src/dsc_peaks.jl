@@ -148,7 +148,7 @@ Peak_name $(confirm(@bind selectedpk TextField(default = "peak-")))
 """
 
 # ╔═╡ 0bb27c5f-9402-4035-865b-a455e5dbce7a
-md""" save the first selected peak ? $(@bind save_splitted_peaks Button("Save"))"""
+md""" save the first selected peak ? $(@bind save_splitted_peaks CheckBox(default=false))"""
 
 # ╔═╡ 522acdd4-5dfd-4827-a063-2fbfd8c0d000
 md"""Show  : $(@bind other_shows PlutoUI.MultiCheckBox([:y,:y0,:r]))"""
@@ -304,7 +304,7 @@ end
 
 # ╔═╡ 0c23b19a-cf0f-4733-885b-9f08fe6dc850
 begin 
-	save_splitted_peaks
+	if save_splitted_peaks
 	
 	isdir(put_file_folder) || mkdir(put_file_folder)
 	data_to_replace = copy(data_loaded.data)
@@ -321,6 +321,7 @@ begin
 			#cur_file_name = joinpath(put_file_folder, selectedpk*".txt")
 			NetzFileParser.write_like(data_loaded , cur_file_name , data=data_to_replace)
 		end
+	end
 	end
 end
 
@@ -2257,7 +2258,7 @@ version = "1.8.1+0"
 # ╟─241e833c-6c8c-4028-8f7e-c2d1174a8e9a
 # ╟─55a574fa-0ee8-4be3-ba06-4140849b8e35
 # ╟─77d30493-2021-4d76-891c-d9d872b3050d
-# ╠═fee673a1-7b44-4712-aa2a-81edeea99faa
+# ╟─fee673a1-7b44-4712-aa2a-81edeea99faa
 # ╟─9d913b84-e1a7-48b8-b656-4182f6837801
 # ╟─0bb27c5f-9402-4035-865b-a455e5dbce7a
 # ╟─522acdd4-5dfd-4827-a063-2fbfd8c0d000
@@ -2267,7 +2268,7 @@ version = "1.8.1+0"
 # ╟─66d7aa55-3959-4279-a5c7-ffff4a398875
 # ╟─3bbbdc7d-47e6-4b09-9bae-305bd7d60e5f
 # ╟─ae337f5e-ebb3-4ba8-87b3-307c132f58ac
-# ╠═0c23b19a-cf0f-4733-885b-9f08fe6dc850
+# ╟─0c23b19a-cf0f-4733-885b-9f08fe6dc850
 # ╟─cd6683a5-8a2a-4a3e-9fa5-e65f142016eb
 # ╟─fa7041ad-ace6-432c-9b2d-9568aeaafef5
 # ╟─3622d9d0-3651-4d0d-9a35-0c173bca31c1
