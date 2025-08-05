@@ -210,9 +210,9 @@ Optimizer: $(Child(:optimizer,
 					ParticleSwarm=>"ParticleSwarm",
 					SimulatedAnnealing=>
 					"SimulatedAnnealing",LBFGS=>"LBFGS"],
-				default = def(:optimizer,NelderMead))))
+				default = def(:optimizer,ParticleSwarm))))
 
-Number of swarm reruns : $(Child(:try_num,Select(1:20,default=def(:try_num,1))
+Number of swarm reruns : $(Child(:try_num,Select(1:20,default=def(:try_num,10))
 	))
 
 Use constraints if applicable $(Child(:use_constraints, 
@@ -2262,8 +2262,8 @@ version = "1.8.1+0"
 # ╟─03968062-2ba8-4709-87b6-d9457f179140
 # ╟─59e483cd-cfa2-417f-a4bf-535a47c39d46
 # ╟─022d5ec8-cde9-4be0-9441-3afa77f4359f
-# ╠═5f78828b-3558-4889-9922-fd1b834961db
-# ╟─241e833c-6c8c-4028-8f7e-c2d1174a8e9a
+# ╟─5f78828b-3558-4889-9922-fd1b834961db
+# ╠═241e833c-6c8c-4028-8f7e-c2d1174a8e9a
 # ╟─55a574fa-0ee8-4be3-ba06-4140849b8e35
 # ╟─77d30493-2021-4d76-891c-d9d872b3050d
 # ╟─fee673a1-7b44-4712-aa2a-81edeea99faa
