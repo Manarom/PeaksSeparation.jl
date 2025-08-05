@@ -7,13 +7,15 @@ module PeaksSeparation
 
     const default_optimizer = Ref(ParticleSwarm(n_particles=100))
     const fwhm = 2*sqrt(2*log(2.0)) # contant to evaluate the dispersion of Gaussian from peaks's fwhm
-    f_gauss(x,μ,σ,a) = a*exp(- ^(x-μ,2) * 0.5 * ^(σ,-2))
+    include("Utils.jl")
+    f_gauss(x,μ,σ,a) = abs(σ)>1e-6 ? a*exp(- ^(x-μ,2) * 0.5 * ^(σ,-2)) : a*exp(- ^(x-μ,2) * 0.5 * 1e12)
      
     sqr(x) = x^2
     function ∇gauss(x,μ,σ,a) 
         fval =  f_gauss(x,μ,σ,a)
-        fa = isapprox(a,0.0,atol=1e-6) ? f_gauss(x,μ,σ,1) : fval/a  
-        (-(x - μ)*fval/(σ^2), fval*( ^(x-μ,2)/^(σ,3)) ,fa )
+        fa = a > 1e-6 ? fval/a : f_gauss(x,μ,σ,1.0)  
+        abs(σ) > 1e-6 || (σ = 1e-6) 
+        ((x - μ)*fval/(σ^2), fval*( ^(x-μ,2)/^(σ,3)) ,fa )
     end 
     
 
@@ -24,20 +26,7 @@ module PeaksSeparation
     #∇σ_gauss(g,μ,σ,a,x,y) = @. g = ^(x-μ,2)* y /^(σ,3)
 
 
-    macro iterator_unpack(N::Int, x)
-        expr = Expr(:tuple)
-        push!(expr.args, quote
-            (val, state) = iterate($(esc(x)))
-            val
-        end)
-        for i = 2:N
-            push!(expr.args, quote
-                (val, state) = iterate($(esc(x)), state)
-                val
-            end)
-        end
-        expr
-    end
+
     # N - is the number of parameters of this component
     abstract type AbstractCurveComponent{N} end
     eval_to!(y,cc::AbstractCurveComponent,x) = map!(cc,y,x)
@@ -78,9 +67,8 @@ add_to!(y,cc::AbstractCurveComponent,x) = @. y += cc(x)
     # baseline supertype
     abstract  type AbstractBaseLine{N}<:AbstractCurveComponent{N} end
     abstract type PolynomialBaseLine{N}<:AbstractBaseLine{N} end
-    function ∇(x,::PolynomialBaseLine{N}) where N
-        ntuple(i->^(x,i-1),Val(N))
-    end
+    abstract type AbstractPeak{N}<:AbstractCurveComponent{N} end
+
     """
     fill_pars!(::PolynomialBaseLine,x)
 
@@ -88,13 +76,22 @@ function to fill baseline polynomial coefficients from the iterable object x
 
 """
 function fill_pars!(::PolynomialBaseLine,x) end
+# generating functions
     for i in 1:5 # reserving function for up to five 
         @eval function fill_pars!(bl::PolynomialBaseLine{$i},x) 
                 setfield!(bl,:parameters , @iterator_unpack($i,x))
                 return bl
         end
+        @eval function fill_pars!(p::AbstractPeak{$i},x)
+            setfield!(p,:parameters, @iterator_unpack($i,x))
+        end
+        @eval function ∇(x,::PolynomialBaseLine{$i})
+            ntuple(i->^(x,i-1),Val($i))
+        end
     end
+
     (bl::PolynomialBaseLine)(x) = @evalpoly(x,getfield(bl,:parameters)...)
+
     mutable struct LinearBaseLine<:PolynomialBaseLine{2}
         parameters::NTuple{2,Float64}
         names::NTuple{2,Symbol}
@@ -103,9 +100,7 @@ function fill_pars!(::PolynomialBaseLine,x) end
             new((0.0,0.0),(:b1,:b2),(false,false))
         end
     end
-       # (bl::LinearBaseLine)(x) = bl.parameters[1] + bl.parameters[2]*x
-
-    abstract type AbstractPeak{N}<:AbstractCurveComponent{N} end
+   
     mutable struct GaussPeak<:AbstractPeak{3}
         parameters::NTuple{3,Float64}
         names::NTuple{3,Symbol}
@@ -128,10 +123,6 @@ Calculates the gradient of GaussPeak as a Tuple of (dμ,dσ,da) for
 a single value of x
 """
     ∇(x,p::GaussPeak) = ∇gauss(x,getfield(p,:parameters)...)
-    function fill_pars!(p::GaussPeak,x)
-            setfield!(p,:parameters, @iterator_unpack(3,x))
-            return p
-    end
 
     """
     fill_pars!(curve_component_iterator,itr)
@@ -168,15 +159,44 @@ MultiPeaks(x::T,y0::T,N::Int,
                 ::Type{P}=GaussPeak,
                 ::Type{B}=LinearBaseLine) where {P<:AbstractPeak,B<:AbstractBaseLine,T}= begin
                             @assert N>=1 "Number of peaks must be greater or equal 1"
-                            new{N,B,P,typeof(x)}(x,y0,
+                            mp = new{N,B,P,typeof(x)}(x,y0,
                                         similar(y0),similar(y0),
                                         SVector(ntuple(P,Val(N))),
                                         (false,false,false),
                                         B())
+                            residual!(mp)
+                            return mp
         end
     end
+
 function Base.getindex(mp::MultiPeaks{N},i) where N
-    (i >N || i < 0) ? error("Index out of bounds") : return i == 0 ? mp.baseline : mp.peaks[i]
+    (i >N || i < 0) ? error("Index out of bounds") : return i == 0 ? getfield(mp,:baseline) : getfield(mp,:peaks)[i]
+end
+"""
+    is_new_params(p,mp::MultiPeaks{N,B,P}) where {N,B,P}
+
+TBW
+"""
+function is_new_params(p,mp::MultiPeaks{N,B,P}) where {N,B,P}
+    length(p) == parnumber(mp) || return true
+
+    Base_pars_number = parnumber(B)
+    Peak_pars_number = parnumber(P)
+    _pb = @view p[1:Base_pars_number]
+    for (bj,pj) in zip(parameters(mp[0]),_pb)
+        bj == pj || return true 
+    end
+    startind = Base_pars_number + 1
+    endind = 0 
+    for ith_peak in mp.peaks
+        endind = startind + Peak_pars_number -1
+        _pb = @view p[startind:endind]
+        for (bj,pj) in zip(parameters(ith_peak),_pb)
+            bj == pj || return true 
+        end
+        startind = endind + 1
+    end
+    return false
 end
 parnumber(::MultiPeaks{N,B,P}) where {N,B,P} = parnumber(B)+ N*parnumber(P) # total parnumber of the curve 
 #
@@ -213,9 +233,7 @@ function residual!(mp::MultiPeaks{N}) where N
         @. mp.r =mp.y - mp.y0
         return mp
     end
-function grad!(g,x,mp::MultiPeaks{N}) where N
 
-end
     """
     fill_pars!(mp::MultiPeaks{N},x) where N
 
@@ -225,6 +243,7 @@ function fill_pars!(mp::MultiPeaks{N},x) where N
         itr = Iterators.Stateful(x)
         fill_pars!(mp.baseline,itr)
         fill_pars!(mp.peaks,itr)
+        residual!(mp) # recalculating residuals
         return nothing
     end
     """
@@ -234,51 +253,25 @@ Evaluates discrepancy value
 """
 function discr(x,mp::MultiPeaks{N}) where N
         fill_pars!(mp,x)
-        residual!(mp)
-        return sum(sqr,mp.r)
+        return sum(sqr,mp.r)/2
     end
     discr_fun(x,p) = x->discr(x,p)
-    #=function grad!(g::AbstractVector,t::Float64 ,e::MultiPeaks{N}) where N
-        ∇!(t,e)
-        residual!(e,t)
-        if t!=e.Tgrad[]
-            g[end]= - dot(e.ri,e.∇I) # filling gradient vector
-            e.Tgrad[] = t
+    # result = tuple((x * factor for x in t)...)
+    ∇(xi,ri,mp::MultiPeaks{N}) where N =  ntuple(i->tuple_mult(∇(xi,mp[i-1]),ri), Val(N+1))
+    function grad!(g::AbstractVector, x ,mp::MultiPeaks{N,B,P}) where {N,B,P}
+        !is_new_params(x,mp) || fill_pars!(mp,x) 
+        fill!(g,0.0)
+        for (i,xi) in enumerate(mp.x)
+            ri = getindex(getfield(mp,:r),i)
+            add_from_tuples!(g,∇(xi,ri,mp)...)    
         end
-        return nothing
-    end=#
+    end
     """
     fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
 
-Puts all content of args (tuple of tuple or vector) into a single vector
+Puts all content of args (tuple of tuple or vector of vectors et.c) into a single vector
 """
-function fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
-        counter = 0
-        for arg in args
-            for ei in arg
-                !isnothing(ei) || continue
-                counter+=1
-                if !resizable
-                    v[counter] = ei
-                else
-                    set_or_push!(v,counter,ei)
-                end
-            end
-        end
-        return v
-    end
-    function set_or_push!(v, i::Int, val)
-        M=length(v)
-        if 1 <= i <= M
-            v[i] = val
-        elseif i == M + 1
-            push!(v, val)
-        else i > M + 1
-            resize!(v, i) 
-            v[i] = val
-        end
-        return 1
-    end
+
     peak_number(::MultiPeaks{N}) where N = N
     function fill_vector_with_pars!(v,p::MultiPeaks{N};resizable::Bool=false) where N 
         fill_from_tuples!(v,ntuple(i->parameters(p[i-1]), Val(N+1))...,resizable=resizable)
@@ -373,7 +366,7 @@ function param_estimate(::Type{GaussPeak},x,y,indices::Vector{Int})
             starting = starting_vector
         end
         fill_pars!(p,starting)
-        optim_fun = OptimizationFunction(discr,AutoFiniteDiff())
+        optim_fun = OptimizationFunction(discr,AutoFiniteDiff(),grad=grad!) #AutoFiniteDiff()
         
         if use_constraints
             box = box_constraints(p,
@@ -420,9 +413,9 @@ function split_peaks(mp::MultiPeaks{N,B,P};
         else
             inds = collect(1:N)
         end
-        for i = 1:N 
+        @views for i = 1:N 
             j = inds[i]
-            v = @view o[:,i] 
+            v =  o[:,i] 
             map!(mp[j],v,x_calc)
         end
         return o

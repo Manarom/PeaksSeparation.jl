@@ -36,13 +36,13 @@ begin
 end;
 
 # ╔═╡ 699e56fd-ff6f-4361-a822-7779942616db
-f_g(μ,σ,a)=x->exp(- ^(x-μ,2)/2*σ^2)*a
+f_g(μ,σ,a)=x->exp(- ^(x-μ,2)/(2*σ^2))*a
 
 # ╔═╡ 91f65aa7-7692-4299-9575-d9fded0797a4
 md" μ = $(@bind mu_test Slider(100:1:1000,default=200,show_value=true))"
 
 # ╔═╡ 71ee6058-63f1-4602-a0d8-84c701175490
-md" σ = $(@bind sigma_test Slider(0.0001:0.001:0.3,default=1e-2,show_value=true))"
+md" σ = $(@bind sigma_test Slider(1:1000,default=20,show_value=true))"
 
 # ╔═╡ 34d442b9-bdf5-4a0a-a0de-baadd468d358
 md" a = $(@bind a_test Slider(0.001:0.001:1,default=1e-2,show_value=true))"
@@ -53,7 +53,7 @@ plot(test_data[:,1],f_g(mu_test,sigma_test,a_test).(test_data[:,1]),label="μ=$(
 # ╔═╡ a47c7a06-c233-4550-aa5b-7fd0935d187d
 begin
 	
-	sigmas = (2e-2, 1e-1, 0.12)
+	sigmas = (50, 10, 120)
 	mus = (335, 600, 1000)
 	as = (1, 0.8, 0.5 )
 	d = @view test_data[:,2]
@@ -64,6 +64,15 @@ begin
 		@. d += f_g(m,s,a)(x)
 	end	
 	(sol,m_p) = fit_peaks(test_data[:,1],test_data[:,2],N=3)
+	m_p
+end
+
+# ╔═╡ bf8f78ff-3eb6-4ec0-84db-59d0b7387236
+begin 
+	for p in m_p.peaks
+		
+     	@show (p.μ,p.σ,p.a)
+	end
 end
 
 # ╔═╡ a19b8338-4215-41b2-ab5e-d32041042300
@@ -76,6 +85,14 @@ end
 
 # ╔═╡ 8322f208-a5d5-4598-b3d6-6a07c2c288cb
 m_p
+
+# ╔═╡ fe91afb5-26d1-43ea-ae10-310ece082f54
+begin 
+	v_solve = [0.0;0.0;335;50;1.0;600; 10;0.8;1000;120;0.5]
+	g_test = copy(v_solve)
+	PeaksSeparation.grad!(g_test,v_solve,m_p)
+	g_test
+end
 
 # ╔═╡ e82b3663-5e59-43dc-b595-228f98dd7ceb
 data_folder = joinpath(@__DIR__,"data");
@@ -183,8 +200,8 @@ def(t::Symbol, d) = isassigned(prev_UU) ? getfield(prev_UU[],t) : d
     md"""
 
 Peaks number to fit: $(Child(:peak_number, 
-							  Select(1:15,
-								default=def(:peak_number,4))
+							  Select(1:20,
+								default=def(:peak_number,5))
 							)
 						)
     
@@ -192,10 +209,10 @@ Optimizer: $(Child(:optimizer,
 			Select([NelderMead=>"Nelder-Mead", 
 					ParticleSwarm=>"ParticleSwarm",
 					SimulatedAnnealing=>
-					"SimulatedAnnealing",BFGS=>"LBFGS"],
-				default = def(:optimizer,NelderMead))))
+					"SimulatedAnnealing",LBFGS=>"LBFGS"],
+				default = def(:optimizer,ParticleSwarm))))
 
-Number of swarm reruns : $(Child(:try_num,Select(1:20,default=def(:try_num,1))
+Number of swarm reruns : $(Child(:try_num,Select(1:20,default=def(:try_num,10))
 	))
 
 Use constraints if applicable $(Child(:use_constraints, 
@@ -225,16 +242,17 @@ begin
 		x_data = x_full[fl]
 		y_data =y_full[fl]
 		N_peaks = UU.peak_number != 0 ? UU.peak_number : nothing
-		is_swarm = UU.optimizer==ParticleSwarm
+		is_swarm = UU.optimizer==ParticleSwarm 
+		is_annealing = UU.optimizer==SimulatedAnnealing
 		is_nm = UU.optimizer==NelderMead
 		is_cons = is_swarm || !is_nm && UU.use_constraints
 		trial_vect = Vector{MultiPeaks}()
 		m = nothing
 		if !isassigned(sol_c) || !refit_previous
-			if is_swarm && (UU.try_num !=1)
+			if (is_swarm || is_annealing) && (UU.try_num !=1)
 				Threads.@threads for i in 1:UU.try_num
 					(s,m) = fit_peaks(x_data,y_data,N=N_peaks,
-									  use_constraints=is_cons,
+									  use_constraints=is_cons && is_swarm,
 									  optimizer = UU.optimizer(),
 									 allow_negative_peaks_amplitude = UU.allow_endo,
 									 allow_negative_baseline_tangent = UU.allow_negative_basline)
@@ -251,7 +269,7 @@ begin
 			sol_c[] = m
 		else
 			m = sol_c[]
-			fit_peaks!(m)
+			fit_peaks!(m,optimizer=LBFGS())
 		end
 		refit
 	end
@@ -330,18 +348,6 @@ begin
 	refit
 	m
 end 
-
-# ╔═╡ f101d599-b934-4e79-865a-7bb6b073ca9b
-PeaksSeparation.∇(300.0,m[3])
-
-# ╔═╡ 639bcdde-a396-4787-9350-55a7f86de6ce
-plot(x,[sqrt(sum(i->i^2,PeaksSeparation.∇(xi,m[1]))) for xi in x])
-
-# ╔═╡ 7e93d6a9-458b-41ca-8c2b-1bad53c8c8a0
-o = map(x->PeaksSeparation.∇(x,m[3]),x)
-
-# ╔═╡ e4dfb0e3-9570-4634-b1ae-4634a436e5ef
-x
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2237,14 +2243,16 @@ version = "1.8.1+0"
 # ╟─220e00cc-7797-498a-bd55-70c3ae89ea64
 # ╟─b37565fd-041d-4661-b1b3-81f6f5b8ea06
 # ╟─7c0eb1de-e9df-4829-8b8a-a5ba25e9cde6
-# ╟─699e56fd-ff6f-4361-a822-7779942616db
+# ╠═699e56fd-ff6f-4361-a822-7779942616db
 # ╟─e488c1a4-4a2f-4255-af2b-f5e47c354e1a
 # ╟─91f65aa7-7692-4299-9575-d9fded0797a4
 # ╠═71ee6058-63f1-4602-a0d8-84c701175490
 # ╟─34d442b9-bdf5-4a0a-a0de-baadd468d358
-# ╟─a47c7a06-c233-4550-aa5b-7fd0935d187d
-# ╟─a19b8338-4215-41b2-ab5e-d32041042300
+# ╠═a47c7a06-c233-4550-aa5b-7fd0935d187d
+# ╟─bf8f78ff-3eb6-4ec0-84db-59d0b7387236
+# ╠═a19b8338-4215-41b2-ab5e-d32041042300
 # ╟─8322f208-a5d5-4598-b3d6-6a07c2c288cb
+# ╠═fe91afb5-26d1-43ea-ae10-310ece082f54
 # ╟─e82b3663-5e59-43dc-b595-228f98dd7ceb
 # ╟─942fff33-676a-453c-9399-2ae5de128a73
 # ╟─ea56f950-0724-4f3b-82e4-9ff73928b923
@@ -2255,7 +2263,7 @@ version = "1.8.1+0"
 # ╟─59e483cd-cfa2-417f-a4bf-535a47c39d46
 # ╟─022d5ec8-cde9-4be0-9441-3afa77f4359f
 # ╟─5f78828b-3558-4889-9922-fd1b834961db
-# ╟─241e833c-6c8c-4028-8f7e-c2d1174a8e9a
+# ╠═241e833c-6c8c-4028-8f7e-c2d1174a8e9a
 # ╟─55a574fa-0ee8-4be3-ba06-4140849b8e35
 # ╟─77d30493-2021-4d76-891c-d9d872b3050d
 # ╟─fee673a1-7b44-4712-aa2a-81edeea99faa
@@ -2264,17 +2272,13 @@ version = "1.8.1+0"
 # ╟─522acdd4-5dfd-4827-a063-2fbfd8c0d000
 # ╟─ab595c5b-9bba-470d-88a6-a5d3d4186dad
 # ╟─8836e046-7daa-4117-ad2e-289a57b2286b
-# ╟─eb08b226-e156-436e-b6ee-0ef7aaa94074
-# ╟─66d7aa55-3959-4279-a5c7-ffff4a398875
+# ╠═eb08b226-e156-436e-b6ee-0ef7aaa94074
+# ╠═66d7aa55-3959-4279-a5c7-ffff4a398875
 # ╟─3bbbdc7d-47e6-4b09-9bae-305bd7d60e5f
 # ╟─ae337f5e-ebb3-4ba8-87b3-307c132f58ac
 # ╟─0c23b19a-cf0f-4733-885b-9f08fe6dc850
 # ╟─cd6683a5-8a2a-4a3e-9fa5-e65f142016eb
 # ╟─fa7041ad-ace6-432c-9b2d-9568aeaafef5
 # ╟─3622d9d0-3651-4d0d-9a35-0c173bca31c1
-# ╠═f101d599-b934-4e79-865a-7bb6b073ca9b
-# ╠═639bcdde-a396-4787-9350-55a7f86de6ce
-# ╠═7e93d6a9-458b-41ca-8c2b-1bad53c8c8a0
-# ╠═e4dfb0e3-9570-4634-b1ae-4634a436e5ef
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
