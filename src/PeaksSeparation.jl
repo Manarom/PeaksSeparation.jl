@@ -7,6 +7,7 @@ module PeaksSeparation
 
     const default_optimizer = Ref(ParticleSwarm(n_particles=100))
     const fwhm = 2*sqrt(2*log(2.0)) # contant to evaluate the dispersion of Gaussian from peaks's fwhm
+    include("Utils.jl")
     f_gauss(x,μ,σ,a) = a*exp(- ^(x-μ,2) * 0.5 * ^(σ,-2))
      
     sqr(x) = x^2
@@ -24,20 +25,7 @@ module PeaksSeparation
     #∇σ_gauss(g,μ,σ,a,x,y) = @. g = ^(x-μ,2)* y /^(σ,3)
 
 
-    macro iterator_unpack(N::Int, x)
-        expr = Expr(:tuple)
-        push!(expr.args, quote
-            (val, state) = iterate($(esc(x)))
-            val
-        end)
-        for i = 2:N
-            push!(expr.args, quote
-                (val, state) = iterate($(esc(x)), state)
-                val
-            end)
-        end
-        expr
-    end
+
     # N - is the number of parameters of this component
     abstract type AbstractCurveComponent{N} end
     eval_to!(y,cc::AbstractCurveComponent,x) = map!(cc,y,x)
@@ -250,35 +238,9 @@ function discr(x,mp::MultiPeaks{N}) where N
     """
     fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
 
-Puts all content of args (tuple of tuple or vector) into a single vector
+Puts all content of args (tuple of tuple or vector of vectors et.c) into a single vector
 """
-function fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
-        counter = 0
-        for arg in args
-            for ei in arg
-                !isnothing(ei) || continue
-                counter+=1
-                if !resizable
-                    v[counter] = ei
-                else
-                    set_or_push!(v,counter,ei)
-                end
-            end
-        end
-        return v
-    end
-    function set_or_push!(v, i::Int, val)
-        M=length(v)
-        if 1 <= i <= M
-            v[i] = val
-        elseif i == M + 1
-            push!(v, val)
-        else i > M + 1
-            resize!(v, i) 
-            v[i] = val
-        end
-        return 1
-    end
+
     peak_number(::MultiPeaks{N}) where N = N
     function fill_vector_with_pars!(v,p::MultiPeaks{N};resizable::Bool=false) where N 
         fill_from_tuples!(v,ntuple(i->parameters(p[i-1]), Val(N+1))...,resizable=resizable)
