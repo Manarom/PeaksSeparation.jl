@@ -13,7 +13,7 @@ macro iterator_unpack(N::Int, x)
     end
     expr
 end
-function fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
+function fill_from_tuples!(v,  args;resizable::Bool=false)
     counter = 0
     for arg in args
         for ei in arg
@@ -28,7 +28,7 @@ function fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
     end
     return v
 end
-function add_from_tuples!(v,  args::Vararg;resizable::Bool=false)
+function add_from_tuples!(v,  args ;resizable::Bool=false)
     counter = 0
     for arg in args
         for ei in arg
@@ -66,3 +66,9 @@ function add_or_push!(v, i::Int, val)
     end
 end
 tuple_mult(tpl,factor) = tuple((x * factor for x in tpl)...)
+function replace_nans!(x,new_value)
+    for i in eachindex(x)
+        isnan(x[i]) || continue
+        x[i] = new_value
+    end
+end

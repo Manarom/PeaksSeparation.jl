@@ -1,35 +1,39 @@
 module PeaksSeparation
-    using Optimization, Peaks, StaticArrays,OptimizationOptimJL,ForwardDiff,RecipesBase
+    using Optimization, Peaks, StaticArrays,
+        OptimizationOptimJL,ForwardDiff,RecipesBase,
+        AllocCheck
     export MultiPeaks,
             fit_peaks,
             fit_peaks!,
-            split_peaks
+            split_peaks,
+            GaussPeak,
+            LorentzPeak
 
     const default_optimizer = Ref(ParticleSwarm(n_particles=100))
     const fwhm = 2*sqrt(2*log(2.0)) # contant to evaluate the dispersion of Gaussian from peaks's fwhm
     include("Utils.jl")
-    f_gauss(x,μ,σ,a) = abs(σ)>1e-6 ? a*exp(- ^(x-μ,2) * 0.5 * ^(σ,-2)) : a*exp(- ^(x-μ,2) * 0.5 * 1e12)
-     
     sqr(x) = x^2
+    f_gauss(x,μ,σ,a) = abs(σ)>1e-16 ? a*exp(- 0.5*^(x-μ,2) * ^(σ,-2)) : a*exp(- ^(x - μ, 2) * 0.5 * 1e32)
+     
+   
     function ∇gauss(x,μ,σ,a) 
-        fval =  f_gauss(x,μ,σ,a)
-        fa = a > 1e-6 ? fval/a : f_gauss(x,μ,σ,1.0)  
-        abs(σ) > 1e-6 || (σ = 1e-6) 
-        ((x - μ)*fval/(σ^2), fval*( ^(x-μ,2)/^(σ,3)) ,fa )
-    end 
-    
+        abs(σ) > 1e-16 || (σ = 1e-16) 
+        fa =  f_gauss(x, μ, σ, 1.0) 
+        fmu =  a * (x - μ) * fa /( σ^2 )
+        (fmu, fmu*(x-μ)/σ ,fa )
+    end
 
-    #∇mu_gauss(x,μ,σ,a) =  -(x - μ)*f_gauss(μ,σ,a,x)/σ^2
-    #∇a_gauss(μ,σ,a,x) = f_gauss(μ,σ,1.0,x)
-    #∇σ_gauss(μ,σ,a,x) = f_gauss(μ,σ,a,x) *( ^(x-μ,2)/^(σ,3))
-    #∇mu_gauss!(g,μ,σ,a,x,y) = @. g= -(x - μ)*y/σ^2
-    #∇σ_gauss(g,μ,σ,a,x,y) = @. g = ^(x-μ,2)* y /^(σ,3)
-
-
-
+    f_lorentz(x,μ,σ,a)  = abs(σ)>1e-16 ? a / (1.0 + ((x - μ) / σ) ^ 2) : a / (1.0 + 1e32*(x - μ) ^ 2)
+    function ∇lorentz(x,μ,σ,a) 
+        abs(σ) > 1e-16 || (σ = 1e-16) 
+        fa = f_lorentz(x,μ,σ,1.0)
+        fmu = 2*a*((x - μ) / σ^2)*fa^2
+        (fmu, fmu*(x-μ)/σ ,fa )
+    end
     # N - is the number of parameters of this component
     abstract type AbstractCurveComponent{N} end
-    eval_to!(y,cc::AbstractCurveComponent,x) = map!(cc,y,x)
+  
+eval_to!(y,cc::AbstractCurveComponent,x) = map!(cc,y,x)
     """
     add_to!(y,cc::AbstractCurveComponent,x)
 
@@ -57,7 +61,7 @@ add_to!(y,cc::AbstractCurveComponent,x) = @. y += cc(x)
         return 0
     end
     function Base.getproperty(cc::AbstractCurveComponent{N},field::Symbol) where N
-        !(field == :b || field == :names || field == :flags) || return getfield(cc,field)
+        !(field == :parameters || field == :names || field == :flags) || return getfield(cc,field)
         nm = names(cc)
         for i in 1:N
             field != nm[i] || return parameters(cc)[i]
@@ -70,6 +74,17 @@ add_to!(y,cc::AbstractCurveComponent,x) = @. y += cc(x)
     abstract type AbstractPeak{N}<:AbstractCurveComponent{N} end
 
     """
+    fill_pars!(curve_component_iterator,itr)
+
+curve_component_iterator - iterable object of curve_components
+itr - statefull iterator!
+"""
+function fill_pars!(curve_component_iterator,itr)
+        for cc in curve_component_iterator
+            fill_pars!(cc,itr)
+        end
+    end
+    """
     fill_pars!(::PolynomialBaseLine,x)
 
 function to fill baseline polynomial coefficients from the iterable object x
@@ -77,7 +92,7 @@ function to fill baseline polynomial coefficients from the iterable object x
 """
 function fill_pars!(::PolynomialBaseLine,x) end
 # generating functions
-    for i in 1:5 # reserving function for up to five 
+for i in 1:5 # reserving function for up to five 
         @eval function fill_pars!(bl::PolynomialBaseLine{$i},x) 
                 setfield!(bl,:parameters , @iterator_unpack($i,x))
                 return bl
@@ -100,41 +115,22 @@ function fill_pars!(::PolynomialBaseLine,x) end
             new((0.0,0.0),(:b1,:b2),(false,false))
         end
     end
-   
-    mutable struct GaussPeak<:AbstractPeak{3}
-        parameters::NTuple{3,Float64}
-        names::NTuple{3,Symbol}
-        flags::NTuple{3,Bool}
-        index::Int
-        GaussPeak(i::Int=1,mu=0.0,sigma=0.0,a=0.0) = begin 
-            new((mu,sigma,a),(:μ,:σ,:a),(false,false,false),i)
+    # gauss and lorenz peaks types and first derivatives
+   for (peak_name,f_name,grad_name) in zip((:GaussPeak,:LorentzPeak),(:f_gauss,:f_lorentz),(:∇gauss,:∇lorentz))
+        @eval mutable struct $peak_name <:AbstractPeak{3}
+            parameters::NTuple{3,Float64}
+            names::NTuple{3,Symbol}
+            flags::NTuple{3,Bool}
+            index::Int
+            $peak_name(i::Int=1,mu=0.0,sigma=1.0,a=1.0) = begin 
+                new((mu,sigma,a),(:μ,:σ,:a),(false,false,false),i)
+            end
         end
-    end
-    """
-    (gp::GaussPeak)(x)
+        @eval (p::$peak_name)(x) = $f_name(x,getfield(p,:parameters)...)
+        @eval ∇(x,p::$peak_name) = $grad_name(x,getfield(p,:parameters)...)
+   end
 
-When peak object is evaluated on variable it returns the value of Gaussian
-"""
-    (gp::GaussPeak)(x) = f_gauss(x,getfield(gp,:parameters)...)
-    """
-    ∇(x,p::GaussPeak)
 
-Calculates the gradient of GaussPeak as a Tuple of (dμ,dσ,da) for 
-a single value of x
-"""
-    ∇(x,p::GaussPeak) = ∇gauss(x,getfield(p,:parameters)...)
-
-    """
-    fill_pars!(curve_component_iterator,itr)
-
-curve_component_iterator - iterable object of curve_components
-itr - statefull iterator!
-"""
-function fill_pars!(curve_component_iterator,itr)
-        for cc in curve_component_iterator
-            fill_pars!(cc,itr)
-        end
-    end
 
  #peak functions   
     mutable struct MultiPeaks{N,B<:AbstractBaseLine,P<:AbstractPeak,T<:AbstractVector}
@@ -143,7 +139,7 @@ function fill_pars!(curve_component_iterator,itr)
         y::T
         r::T
         peaks::SVector{N,P}
-        flags
+        flags::SVector{N,Bool}
         baseline::B
         """
     MultiPeaks(x::T,y0::T,N::Int,
@@ -162,7 +158,7 @@ MultiPeaks(x::T,y0::T,N::Int,
                             mp = new{N,B,P,typeof(x)}(x,y0,
                                         similar(y0),similar(y0),
                                         SVector(ntuple(P,Val(N))),
-                                        (false,false,false),
+                                        SVector(ntuple(_->false,Val(N))),
                                         B())
                             residual!(mp)
                             return mp
@@ -230,7 +226,8 @@ Evaluates residual vector
 """
 function residual!(mp::MultiPeaks{N}) where N
         fill_y!(mp)
-        @. mp.r =mp.y - mp.y0
+        copyto!(mp.r,mp.y)
+        @. mp.r -= mp.y0
         return mp
     end
 
@@ -241,8 +238,8 @@ Fills all curve components parameters from iterable object x
 """
 function fill_pars!(mp::MultiPeaks{N},x) where N
         itr = Iterators.Stateful(x)
-        fill_pars!(mp.baseline,itr)
-        fill_pars!(mp.peaks,itr)
+        fill_pars!(getfield(mp,:baseline),itr)
+        fill_pars!(getfield(mp,:peaks),itr)
         residual!(mp) # recalculating residuals
         return nothing
     end
@@ -257,14 +254,17 @@ function discr(x,mp::MultiPeaks{N}) where N
     end
     discr_fun(x,p) = x->discr(x,p)
     # result = tuple((x * factor for x in t)...)
+
     ∇(xi,ri,mp::MultiPeaks{N}) where N =  ntuple(i->tuple_mult(∇(xi,mp[i-1]),ri), Val(N+1))
+
     function grad!(g::AbstractVector, x ,mp::MultiPeaks{N,B,P}) where {N,B,P}
         !is_new_params(x,mp) || fill_pars!(mp,x) 
         fill!(g,0.0)
         for (i,xi) in enumerate(mp.x)
             ri = getindex(getfield(mp,:r),i)
-            add_from_tuples!(g,∇(xi,ri,mp)...)    
+            add_from_tuples!(g,∇(xi,ri,mp))    
         end
+        #@show sum(g.*g)
     end
     """
     fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
@@ -274,7 +274,7 @@ Puts all content of args (tuple of tuple or vector of vectors et.c) into a singl
 
     peak_number(::MultiPeaks{N}) where N = N
     function fill_vector_with_pars!(v,p::MultiPeaks{N};resizable::Bool=false) where N 
-        fill_from_tuples!(v,ntuple(i->parameters(p[i-1]), Val(N+1))...,resizable=resizable)
+        fill_from_tuples!(v,ntuple(i->parameters(p[i-1]), Val(N+1)),resizable=resizable)
     end
 
     """
@@ -307,7 +307,7 @@ function maxima_indices(y,N::Union{Int,Nothing})
 
 Finds peaks and estimates 
 """
-function param_estimate(::Type{GaussPeak},x,y,indices::Vector{Int})
+function param_estimate(::Type{<:Union{GaussPeak,LorentzPeak}},x,y,indices::Vector{Int})
         N = length(indices)
         as = view(y,indices)
         npoints = length(x)
@@ -320,16 +320,16 @@ function param_estimate(::Type{GaussPeak},x,y,indices::Vector{Int})
         mus = @view x[indices]
         return ntuple(i->(mus[i],sigmas[i],as[i]),N)
     end
-    param_estimate(T::Type{GaussPeak},x,y,N::Union{Int,Nothing}) = param_estimate(T,x,y,maxima_indices(y,N))
+    param_estimate(T::Type{<:Union{GaussPeak,LorentzPeak}},x,y,N::Union{Int,Nothing}) = param_estimate(T,x,y,maxima_indices(y,N))
     
     function fill_starting_vector!(starting_vector,mp::MultiPeaks{PeakNum,BaseType,PeakType}) where {PeakNum,BaseType,PeakType}
-        is_resizable = length(starting_vector) != parnumber(mp)
+        length(starting_vector) == parnumber(mp) || resize!(starting_vector,parnumber(mp))
         base_param_number = parnumber(BaseType)
-
+        miny = minimum(mp.y0)
         return fill_from_tuples!(starting_vector,  
-                    (ntuple(t->0,base_param_number),
-                    param_estimate(PeakType,mp.x,mp.y0,PeakNum)...)...
-                    ;resizable=is_resizable)
+                    (ntuple(t->miny,base_param_number),
+                    param_estimate(PeakType,mp.x,mp.y0,PeakNum)...)
+                    ;resizable=false)
     end
     int_floor = Int ∘ floor
     function fit_peaks!(p::MultiPeaks;kwargs...)
@@ -337,12 +337,15 @@ function param_estimate(::Type{GaussPeak},x,y,indices::Vector{Int})
         return fit_peaks(       nothing,
                                 nothing;
                                 p=p,
-                                starting_vector = starting_vector,optimizer = NelderMead(),
+                                starting_vector = starting_vector,
+                                optimizer = NelderMead(),
                                 use_constraints =false,
                                 kwargs...)
     end
     function fit_peaks(x::T,y::T ;
                         N::Union{Int,Nothing}=nothing,
+                        PeakType::Type{<:AbstractPeak}=GaussPeak,
+                        BaseLineType::Type{<:AbstractBaseLine}=LinearBaseLine,
                         starting_vector::Union{Nothing,AbstractVector} = nothing,
                         optimizer = nothing,
                         p::Union{Nothing,MultiPeaks} = nothing,
@@ -359,21 +362,21 @@ function param_estimate(::Type{GaussPeak},x,y,indices::Vector{Int})
             #pks = fix_peaks_number(y,N)
             #N = length(pks.indices)
             if !is_p_provided
-                p = MultiPeaks(x,y,N)
+                p = MultiPeaks(x,y,N,PeakType,BaseLineType)
             end
             starting = fill_starting_vector!(Float64[],p)
         else
             starting = starting_vector
         end
         fill_pars!(p,starting)
-        optim_fun = OptimizationFunction(discr,AutoFiniteDiff(),grad=grad!) #AutoFiniteDiff()
+        optim_fun = OptimizationFunction(discr,grad=grad!) #AutoFiniteDiff()
         
         if use_constraints
             box = box_constraints(p,
                             constraints_expansion=constraints_expansion,
                             allow_negative_peaks_amplitude=allow_negative_peaks_amplitude,
                             allow_negative_baseline_tangent = allow_negative_baseline_tangent)
-
+            check_bounds_on_starting_vector!(starting,box)
             probl= OptimizationProblem(optim_fun, 
                                         starting,
                                         p,
@@ -393,6 +396,14 @@ function param_estimate(::Type{GaussPeak},x,y,indices::Vector{Int})
         fill_pars!(p,sol.u)
         residual!(p)
         return (sol,p)
+    end
+    function check_bounds_on_starting_vector!(starting_vector,box)
+        length(box.lb) == length(starting_vector) || resize!(starting_vector,length(box.lb))
+        for (i,(lbi,si,ubi)) in enumerate(zip(box.lb,starting_vector,box.ub))
+            box_span = ubi - lbi
+            !(lbi < si < ubi) || continue     
+            starting_vector[i] = si < lbi ?  lbi + 1e-6*box_span : ubi - 1e-6*box_span
+        end
     end
     """
     split_peaks(mp::MultiPeaks{N,B,P};
@@ -418,7 +429,7 @@ function split_peaks(mp::MultiPeaks{N,B,P};
             v =  o[:,i] 
             map!(mp[j],v,x_calc)
         end
-        return o
+        return o,inds
     end
     """
     box_constraints(p::MultiPeaks{N}) where N
@@ -428,7 +439,7 @@ Evaluates box constraints on the
 function box_constraints(p::MultiPeaks{N,B,P};
             constraints_expansion::Float64=1.0,
             allow_negative_peaks_amplitude::Bool=true,
-            allow_negative_baseline_tangent::Bool=true) where {N,B,P<:GaussPeak}
+            allow_negative_baseline_tangent::Bool=true) where {N,B,P<:Union{GaussPeak,LorentzPeak}}
         # method calculates box constraints 
         # of the feasible region (dumb version)
         mu_bnds = extrema(p.x)
@@ -453,8 +464,8 @@ function box_constraints(p::MultiPeaks{N,B,P};
         _lb = @view lb[base_npars+1:npars]
         _ub = @view ub[base_npars+1:npars]
 
-        fill_from_tuples!(_lb,ntuple(i->(mu_bnds[1],s_bnds[1],a_bnds[1]), Val(N))...)
-        fill_from_tuples!(_ub,ntuple(i->(mu_bnds[2],s_bnds[2],a_bnds[2]), Val(N))...)
+        fill_from_tuples!(_lb,ntuple(i->(mu_bnds[1],s_bnds[1],a_bnds[1]), Val(N)))
+        fill_from_tuples!(_ub,ntuple(i->(mu_bnds[2],s_bnds[2],a_bnds[2]), Val(N)))
 
         return (lb=constraints_expansion*lb,ub=constraints_expansion*ub)
     end
@@ -470,11 +481,11 @@ function box_constraints(p::MultiPeaks{N,B,P};
         markershape --> :diamond
         markersize -->3
         markeralpha-->0.5
-        out_mat = split_peaks(m)
+        (out_mat,inds) = split_peaks(m)
         # N=peak_number(m)
         for (i,c)in enumerate(eachcol(out_mat))
             @series begin 
-                label:="p_$(i)"    
+                label:="p_$(inds[i])"    
                 linewidth:=2
                 fillrange:=0
                 fillalpha:=0.3
@@ -489,11 +500,23 @@ function box_constraints(p::MultiPeaks{N,B,P};
             (m.x, m.y)
         end
         return (m.x,m.y0)
-    end 
-    function replace_nans!(x,new_value)
-        for i in eachindex(x)
-            isnan(x[i]) || continue
-            x[i] = new_value
-        end
     end
+    @recipe function f(x,m::AbstractCurveComponent)
+        minorgrid--> true
+        gridlinewidth-->2
+        dpi-->600
+        xlabel-->"Temperature"
+        ylabel-->"DSC disgnal"
+        label-->"y0"
+        linewidth-->3
+        markershape --> :diamond
+        markersize -->3
+        markeralpha-->0.5
+        linewidth-->2
+        fillrange-->0
+        fillalpha-->0.3
+        markershape:=:none
+        return (x,m.(x))
+    end 
+
 end
