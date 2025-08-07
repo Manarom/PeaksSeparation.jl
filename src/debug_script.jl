@@ -1,4 +1,5 @@
 using Plots,BenchmarkTools,Revise,Peaks,Optimization,CSV,DataFrames,OptimizationOptimJL,ForwardDiff
+using Profile
 includet("PeaksSeparation.jl")
 
 f(x,μ,σ,a) = exp(- 0.5* ^(x-μ,2)/(σ^2))*a
@@ -17,11 +18,16 @@ f1(par_check)
 v_autodiff = ForwardDiff.gradient(f1,par_check)
 v_an = similar(v_autodiff)
 
-v_an = PeaksSeparation.fill_from_tuples!(v_an,PeaksSeparation.∇(300.0,1,mp)...)
-
-
-
-
+v_an = PeaksSeparation.fill_from_tuples!(v_an,PeaksSeparation.∇(300.0,1,mp))
+Profile.init()
+@profview for _ in 1:10000 
+    PeaksSeparation.fill_from_tuples!(v_an,PeaksSeparation.∇(300.0,1,mp))
+end
+@benchmark PeaksSeparation.fill_from_tuples!(v_an,PeaksSeparation.∇(300.0,1,mp))
+    #@profview
+Profile.print() 
+f_1() = 2+2
+@profile f_1()
 begin
     
     N=300
@@ -59,20 +65,20 @@ s_v = PeaksSeparation.fill_starting_vector!(Float64[],mp)
 PeaksSeparation.fill_pars!(mp,s_v)
 plot(mp)
 gv = similar(s_v)
-PeaksSeparation.grad!(gv,s_v,mp)
-gv
-PeaksSeparation.residual!(mp)
-plot!(pl,mp.x,mp.y)
 
+mp = PeaksSeparation.MultiPeaks(x,y,3,PeaksSeparation.LorentzPeak)
+PeaksSeparation.fill_pars!(mp,s_v)
+plot(mp)
 
-(sol,p) = PeaksSeparation.fit_peaks(x,y,optimizer = LBFGS(),N=3,use_constraints=false)
-pl = plot(p.x,p.y)
-plot!(pl,p.x,p.y0,label="data to fit")
+(sol,p) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)
 plot(p)
 
+(sol,p_lorentz) = PeaksSeparation.fit_peaks(x,y,optimizer = LBFGS(),N=3,use_constraints=true,
+                PeakType=PeaksSeparation.GaussPeak)
+plot(p_lorentz)
 
-(sol,p) = PeaksSeparation.fit_peaks!(p)
-pl = plot(p.x,p.y);
+(sol,p_lorentz) = PeaksSeparation.fit_peaks!(p_lorentz,optimizer=LBFGS(),N=3,use_constraints=true)
+pl = plot(p_lorentz)
 plot!(pl,x,d,label="data to fit")
 
 # loadig test data

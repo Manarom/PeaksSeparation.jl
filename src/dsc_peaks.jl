@@ -17,7 +17,7 @@ macro bind(def, element)
 end
 
 # ╔═╡ cb0dffa0-678c-11f0-14a2-e1c0a3befdaf
-using CSV,Peaks,Plots,PlutoUI,Optimization,OptimizationOptimJL,Revise,StaticArrays,ForwardDiff,RecipesBase,DataFrames
+using CSV,Peaks,Plots,PlutoUI,Optimization,OptimizationOptimJL,Revise,StaticArrays,ForwardDiff,RecipesBase,DataFrames, AllocCheck
 
 # ╔═╡ b37565fd-041d-4661-b1b3-81f6f5b8ea06
 using Main.PeaksSeparation, Main.NetzFileParser
@@ -98,50 +98,54 @@ end
 data_folder = joinpath(@__DIR__,"data");
 
 # ╔═╡ 942fff33-676a-453c-9399-2ae5de128a73
-md""" Current working folder $(@bind working_folder PlutoUI.TextField(default = joinpath(data_folder,"kinetics")))"""
+md""" Set working folder $(@bind working_folder PlutoUI.TextField(default = joinpath(data_folder,"kinetics")))"""
+
+# ╔═╡ 3320d842-ef84-4d22-93c3-3b7450e077f1
+md"""
+Select project folder $(@bind project_name Select([d for d in readdir(working_folder)  if isdir(joinpath(working_folder,d)) ]))
+"""
+
+# ╔═╡ 98baacdd-eb10-40a5-b7bd-07af9de0d883
+project_folder = joinpath(working_folder,project_name);
 
 # ╔═╡ ea56f950-0724-4f3b-82e4-9ff73928b923
 md""" Plot all files in folder ? $(@bind is_all_In_folder CheckBox(default=true))"""
 
-# ╔═╡ 022d5ec8-cde9-4be0-9441-3afa77f4359f
-md""" 
-	File to fit  $(@bind file_to_read Select([f for f in readdir(working_folder) if !isdir(joinpath(working_folder,f)) ]))
-	"""
-
-# ╔═╡ cfcaa806-abbe-4fe0-9c9d-5947a5c8a876
-begin 
-	data_loaded = NetzFileParser.NetzFile(joinpath(working_folder,file_to_read))
-	data_file_names = names(data_loaded.data)
-	
-end;
-
-# ╔═╡ 59e483cd-cfa2-417f-a4bf-535a47c39d46
-md"""
-	X coordinate $(@bind x_coord_name Select(data_file_names,default = data_file_names[1]))
-	Y coordinate $(@bind y_coord_name Select(data_file_names,default = data_file_names[3]))
-	"""
-
 # ╔═╡ f80f2324-4a20-4bc2-80de-08b27eabbb5b
 begin 
+	
 	if is_all_In_folder
 		all_n_data = Vector{NetzFileParser.NetzFile}()
 		all_plot_data = Vector{Tuple{Vector{Float64},Vector{Float64}}}()
 		files_names = Vector{String}()
-		x_ind = occursin("Time",x_coord_name) ? 2 : 1
-		y_ind = occursin("DSC",y_coord_name) ? 3 : 3
-		for file in readdir(working_folder)
+		x_ind = 1#occursin("Time",x_coord_name) ? 2 : 1
+		y_ind = 3#occursin("DSC",y_coord_name) ? 3 : 3
+		for file in readdir(project_folder)
 			!isdir(file) || continue
 			try 
-				cur_data = NetzFileParser.NetzFile(joinpath(working_folder,file))
-				push!(all_n_data,cur_data)
-				push!(all_plot_data,(cur_data.data[:,x_ind],cur_data.data[:,y_ind]))
-				push!(files_names,file)
+					cur_data = NetzFileParser.NetzFile(joinpath(project_folder,file))
+					push!(all_n_data,cur_data)
+					push!(all_plot_data,(cur_data.data[:,x_ind],cur_data.data[:,y_ind]))
+					push!(files_names,file)
 				catch ex
-				@show ex
+				#@show ex
 			end
 		end
 	end
 end
+
+# ╔═╡ 022d5ec8-cde9-4be0-9441-3afa77f4359f
+md""" 
+File to fit  $(@bind file_to_read 
+	Select([f for f in readdir(project_folder) if !isdir(joinpath(project_folder,f))])
+	)	
+	"""
+
+# ╔═╡ cfcaa806-abbe-4fe0-9c9d-5947a5c8a876
+begin 
+	data_loaded = NetzFileParser.NetzFile(joinpath(project_folder,file_to_read))
+	data_file_names = names(data_loaded.data)
+end;
 
 # ╔═╡ 2fbbe44b-ebc1-49c6-929c-1efbbb55b84b
 begin 
@@ -151,21 +155,20 @@ begin
 	ylabel!(data_file_names[y_ind])
 end
 
-# ╔═╡ 03968062-2ba8-4709-87b6-d9457f179140
+# ╔═╡ 59e483cd-cfa2-417f-a4bf-535a47c39d46
+md"""
+	X coordinate $(@bind x_coord_name Select(data_file_names,default = data_file_names[1]))
+	Y coordinate $(@bind y_coord_name Select(data_file_names,default = data_file_names[3]))
+	"""
+
+# ╔═╡ b0097572-65d6-460b-9fed-768dcc20957a
 begin 
 	x_full = getproperty(data_loaded.data,x_coord_name)
 	y_full = getproperty(data_loaded.data,y_coord_name)
 end;
 
-# ╔═╡ 9d913b84-e1a7-48b8-b656-4182f6837801
-md""" 
-	
-Peak_name $(confirm(@bind selectedpk TextField(default = "peak-")))
-
-"""
-
 # ╔═╡ 0bb27c5f-9402-4035-865b-a455e5dbce7a
-md""" save the first selected peak ? $(@bind save_splitted_peaks CheckBox(default=false))"""
+md""" save selected peaks ? $(@bind save_splitted_peaks CheckBox(default=false))"""
 
 # ╔═╡ 522acdd4-5dfd-4827-a063-2fbfd8c0d000
 md"""Show  : $(@bind other_shows PlutoUI.MultiCheckBox([:y,:y0,:r]))"""
@@ -183,22 +186,15 @@ begin
 end
 
 # ╔═╡ ae337f5e-ebb3-4ba8-87b3-307c132f58ac
-@bind put_file_folder PlutoUI.TextField(default =joinpath(working_folder,split(file_to_read,".")[1]))
-
-# ╔═╡ cd6683a5-8a2a-4a3e-9fa5-e65f142016eb
-md"""
-	fix μ's $(@bind fix_mus CheckBox(false))
-	fix σ's $(@bind fix_sigs CheckBox(false))
-	fix a's $(@bind fix_as CheckBox(false))
-	"""
+@bind put_file_folder PlutoUI.TextField(default =joinpath(project_folder,split(file_to_read,".")[1]))
 
 # ╔═╡ 3622d9d0-3651-4d0d-9a35-0c173bca31c1
 def(t::Symbol, d) = isassigned(prev_UU) ? getfield(prev_UU[],t) : d
 
 # ╔═╡ 5f78828b-3558-4889-9922-fd1b834961db
 @bind UU confirm(PlutoUI.combine() do Child
-    md"""
-
+md"""
+	
 Peaks number to fit: $(Child(:peak_number, 
 							  Select(1:20,
 								default=def(:peak_number,5))
@@ -211,7 +207,11 @@ Optimizer: $(Child(:optimizer,
 					SimulatedAnnealing=>
 					"SimulatedAnnealing",LBFGS=>"LBFGS"],
 				default = def(:optimizer,ParticleSwarm))))
-
+	
+Peaks type: $(Child(:peaksType, Select([ GaussPeak => "Gaussian",
+					 LorentzPeak => "Lorentzian"
+					],default= GaussPeak))				)
+	
 Number of swarm reruns : $(Child(:try_num,Select(1:20,default=def(:try_num,10))
 	))
 
@@ -254,6 +254,7 @@ begin
 					(s,m) = fit_peaks(x_data,y_data,N=N_peaks,
 									  use_constraints=is_cons && is_swarm,
 									  optimizer = UU.optimizer(),
+									  PeakType = UU.peaksType,
 									 allow_negative_peaks_amplitude = UU.allow_endo,
 									 allow_negative_baseline_tangent = UU.allow_negative_basline)
 					push!(trial_vect,m)
@@ -262,6 +263,7 @@ begin
 			else
 				(s,m) = fit_peaks(x_data,y_data,N=N_peaks,
 								  use_constraints=is_cons,
+								  PeakType = UU.peaksType,
 								  optimizer = UU.optimizer(),
 							      allow_negative_peaks_amplitude = UU.allow_endo,
 									 allow_negative_baseline_tangent = UU.allow_negative_basline )
@@ -269,7 +271,7 @@ begin
 			sol_c[] = m
 		else
 			m = sol_c[]
-			fit_peaks!(m,optimizer=LBFGS())
+			fit_peaks!(m;optimizer = GradientDescent())
 		end
 		refit
 	end
@@ -289,13 +291,14 @@ begin
 	if !isempty(show_peaks) ||  !isempty(other_shows)
 		is_plotted = !isempty(show_peaks)
 		if  is_plotted
-			plot_kwargs = (:linewidth=>2,:fillrange=>0, 		:fillalpha=>0.3)
-			lbl = show_peaks[1] == 0 ? "baseline" : "peak #$(show_peaks[1])"
-			peaks_mat = PeaksSeparation.split_peaks(m)
+			plot_kwargs = (:linewidth=>2,:fillrange=>0, 		:fillalpha=>0.3,:legend_background_color=>nothing,:foreground_color_legend=>nothing)
+			(peaks_mat,si) = PeaksSeparation.split_peaks(m)
+			lbl = show_peaks[1] == 0 ? "baseline" : "#$(show_peaks[1]): $(floor.(PeaksSeparation.parameters(m[si[1]]))[1])"
+			
 			yi = show_peaks[1] == 0 ? m[0].(m.x) : peaks_mat[:,show_peaks[1]]
 			p_res= plot(m.x,yi,label = lbl; plot_kwargs... )
 			for pki in show_peaks[2:end]
-				lbli =  "peak #$(pki)"
+				lbli =  "#$(pki) : $(floor.(PeaksSeparation.parameters(m[si[pki]]))[1])"
 				plot!(p_res,m.x,peaks_mat[:,pki],label = lbli; plot_kwargs...)
 			end
 		end
@@ -327,7 +330,7 @@ begin
 	isdir(put_file_folder) || mkdir(put_file_folder)
 	data_to_replace = copy(data_loaded.data)
 	x_calc = data_loaded.data[:,1]
-	splitted_mat = split_peaks(m,x=x_calc)
+	(splitted_mat,) = split_peaks(m,x=x_calc)
 	if !isempty(show_peaks) 
 		counter = 0
 		for i in show_peaks
@@ -349,9 +352,13 @@ begin
 	m
 end 
 
+# ╔═╡ 985e4fa6-dcb8-4f30-91c5-941234d84dad
+plot(x,m_p[3])
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+AllocCheck = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
@@ -363,6 +370,20 @@ PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[compat]
+AllocCheck = "~0.2.2"
+CSV = "~0.10.15"
+DataFrames = "~1.7.0"
+ForwardDiff = "~1.0.1"
+Optimization = "~4.3.0"
+OptimizationOptimJL = "~0.4.3"
+Peaks = "~0.5.3"
+Plots = "~1.40.14"
+PlutoUI = "~0.7.65"
+RecipesBase = "~1.3.4"
+Revise = "~3.8.0"
+StaticArrays = "~1.9.13"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -371,7 +392,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "69e44a00abaeab03b99805e0a2d6dc23189c5877"
+project_hash = "22648ef6cb2ff320d7616fd3133377a6f0c3c38f"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "e2478490447631aedba0823d4d7a80b2cc8cdb32"
@@ -440,6 +461,12 @@ git-tree-sha1 = "9876e1e164b144ca45e9e3198d0b689cadfed9ff"
 uuid = "66dad0bd-aa9a-41b7-9441-69ab47430ed8"
 version = "1.1.3"
 
+[[deps.AllocCheck]]
+deps = ["ExprTools", "GPUCompiler", "LLVM", "MacroTools"]
+git-tree-sha1 = "7e53c22135cd9a3d91e6c56e2e962106dc3d57f2"
+uuid = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
+version = "0.2.2"
+
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
 version = "1.1.2"
@@ -494,6 +521,11 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "1b96ea4a01afe0ea4090c5c8039690672dd13f2e"
 uuid = "6e34b625-4abd-537c-b88f-471c36dfa7a0"
 version = "1.0.9+0"
+
+[[deps.CEnum]]
+git-tree-sha1 = "389ad5c84de1ae7cf0e28e381131c98ea87d54fc"
+uuid = "fa961155-64e5-5f13-b03f-caf6b980ea82"
+version = "0.5.0"
 
 [[deps.CSV]]
 deps = ["CodecZlib", "Dates", "FilePathsBase", "InlineStrings", "Mmap", "Parsers", "PooledArrays", "PrecompileTools", "SentinelArrays", "Tables", "Unicode", "WeakRefStrings", "WorkerUtilities"]
@@ -901,6 +933,12 @@ git-tree-sha1 = "83cf05ab16a73219e5f6bd1bdfa9848fa24ac627"
 uuid = "46192b85-c4d5-4398-a991-12ede77f4527"
 version = "0.2.0"
 
+[[deps.GPUCompiler]]
+deps = ["ExprTools", "InteractiveUtils", "LLVM", "Libdl", "Logging", "PrecompileTools", "Preferences", "Scratch", "Serialization", "TOML", "Tracy", "UUIDs"]
+git-tree-sha1 = "eb1e212e12cc058fa16712082d44be499d23638c"
+uuid = "61eb1bfa-7361-4325-ad38-22787b887f55"
+version = "1.6.1"
+
 [[deps.GR]]
 deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Preferences", "Printf", "Qt6Wayland_jll", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "p7zip_jll"]
 git-tree-sha1 = "4424dca1462cc3f19a0e6f07b809ad948ac1d62b"
@@ -1063,6 +1101,24 @@ git-tree-sha1 = "aaafe88dccbd957a8d82f7d05be9b69172e0cee3"
 uuid = "88015f11-f218-50d7-93a8-a6af411a945d"
 version = "4.0.1+0"
 
+[[deps.LLVM]]
+deps = ["CEnum", "LLVMExtra_jll", "Libdl", "Preferences", "Printf", "Unicode"]
+git-tree-sha1 = "9c7c721cfd800d87d48c745d8bfb65144f0a91df"
+uuid = "929cbde3-209d-540e-8aea-75f648917ca0"
+version = "9.4.2"
+
+    [deps.LLVM.extensions]
+    BFloat16sExt = "BFloat16s"
+
+    [deps.LLVM.weakdeps]
+    BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
+
+[[deps.LLVMExtra_jll]]
+deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl", "TOML"]
+git-tree-sha1 = "2ea068aac1e7f0337d381b0eae3110581e3f3216"
+uuid = "dad2f222-ce93-54a1-a47d-0025e8a3acab"
+version = "0.0.37+2"
+
 [[deps.LLVMOpenMP_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "eb62a3deb62fc6d8822c0c4bef73e4412419c5d8"
@@ -1104,6 +1160,11 @@ version = "0.16.8"
     SymEngine = "123dc426-2d89-5057-bbad-38513e3affd8"
     tectonic_jll = "d7dd28d6-a5e6-559c-9131-7eb760cdacc5"
 
+[[deps.LazyArtifacts]]
+deps = ["Artifacts", "Pkg"]
+uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
+version = "1.11.0"
+
 [[deps.LeftChildRightSiblingTrees]]
 deps = ["AbstractTrees"]
 git-tree-sha1 = "fb6803dafae4a5d62ea5cab204b1e657d9737e7f"
@@ -1134,6 +1195,12 @@ version = "1.7.2+0"
 deps = ["Artifacts", "Libdl", "MbedTLS_jll"]
 uuid = "29816b5a-b9ab-546f-933c-edad1886dfa8"
 version = "1.11.0+1"
+
+[[deps.LibTracyClient_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "d2bc4e1034b2d43076b50f0e34ea094c2cb0a717"
+uuid = "ad6e5548-8b26-5c9f-8ef3-ef0ad883f3a5"
+version = "0.9.1+6"
 
 [[deps.Libdl]]
 uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
@@ -1888,6 +1955,18 @@ deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
 uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 version = "1.11.0"
 
+[[deps.Tracy]]
+deps = ["ExprTools", "LibTracyClient_jll", "Libdl"]
+git-tree-sha1 = "91dbaee0f50faa4357f7e9fc69442c7b6364dfe5"
+uuid = "e689c965-62c8-4b79-b2c5-8359227902fd"
+version = "0.1.5"
+
+    [deps.Tracy.extensions]
+    TracyProfilerExt = "TracyProfiler_jll"
+
+    [deps.Tracy.weakdeps]
+    TracyProfiler_jll = "0c351ed6-8a68-550e-8b79-de6f926da83c"
+
 [[deps.TranscodingStreams]]
 git-tree-sha1 = "0c45878dcfdcfa8480052b6ab162cdd138781742"
 uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
@@ -2238,47 +2317,48 @@ version = "1.8.1+0"
 """
 
 # ╔═╡ Cell order:
-# ╟─cb0dffa0-678c-11f0-14a2-e1c0a3befdaf
-# ╟─e7acdbd5-33e6-47e0-9af0-042e39295891
+# ╠═cb0dffa0-678c-11f0-14a2-e1c0a3befdaf
+# ╠═e7acdbd5-33e6-47e0-9af0-042e39295891
 # ╟─220e00cc-7797-498a-bd55-70c3ae89ea64
-# ╟─b37565fd-041d-4661-b1b3-81f6f5b8ea06
-# ╟─7c0eb1de-e9df-4829-8b8a-a5ba25e9cde6
+# ╠═b37565fd-041d-4661-b1b3-81f6f5b8ea06
+# ╠═7c0eb1de-e9df-4829-8b8a-a5ba25e9cde6
 # ╠═699e56fd-ff6f-4361-a822-7779942616db
 # ╟─e488c1a4-4a2f-4255-af2b-f5e47c354e1a
 # ╟─91f65aa7-7692-4299-9575-d9fded0797a4
 # ╠═71ee6058-63f1-4602-a0d8-84c701175490
 # ╟─34d442b9-bdf5-4a0a-a0de-baadd468d358
-# ╠═a47c7a06-c233-4550-aa5b-7fd0935d187d
+# ╟─a47c7a06-c233-4550-aa5b-7fd0935d187d
 # ╟─bf8f78ff-3eb6-4ec0-84db-59d0b7387236
 # ╠═a19b8338-4215-41b2-ab5e-d32041042300
 # ╟─8322f208-a5d5-4598-b3d6-6a07c2c288cb
-# ╠═fe91afb5-26d1-43ea-ae10-310ece082f54
+# ╟─fe91afb5-26d1-43ea-ae10-310ece082f54
 # ╟─e82b3663-5e59-43dc-b595-228f98dd7ceb
 # ╟─942fff33-676a-453c-9399-2ae5de128a73
+# ╟─3320d842-ef84-4d22-93c3-3b7450e077f1
+# ╟─98baacdd-eb10-40a5-b7bd-07af9de0d883
 # ╟─ea56f950-0724-4f3b-82e4-9ff73928b923
 # ╟─f80f2324-4a20-4bc2-80de-08b27eabbb5b
 # ╟─2fbbe44b-ebc1-49c6-929c-1efbbb55b84b
-# ╟─cfcaa806-abbe-4fe0-9c9d-5947a5c8a876
-# ╟─03968062-2ba8-4709-87b6-d9457f179140
+# ╠═cfcaa806-abbe-4fe0-9c9d-5947a5c8a876
 # ╟─59e483cd-cfa2-417f-a4bf-535a47c39d46
+# ╟─b0097572-65d6-460b-9fed-768dcc20957a
 # ╟─022d5ec8-cde9-4be0-9441-3afa77f4359f
 # ╟─5f78828b-3558-4889-9922-fd1b834961db
 # ╠═241e833c-6c8c-4028-8f7e-c2d1174a8e9a
 # ╟─55a574fa-0ee8-4be3-ba06-4140849b8e35
 # ╟─77d30493-2021-4d76-891c-d9d872b3050d
 # ╟─fee673a1-7b44-4712-aa2a-81edeea99faa
-# ╟─9d913b84-e1a7-48b8-b656-4182f6837801
 # ╟─0bb27c5f-9402-4035-865b-a455e5dbce7a
 # ╟─522acdd4-5dfd-4827-a063-2fbfd8c0d000
 # ╟─ab595c5b-9bba-470d-88a6-a5d3d4186dad
 # ╟─8836e046-7daa-4117-ad2e-289a57b2286b
-# ╠═eb08b226-e156-436e-b6ee-0ef7aaa94074
-# ╠═66d7aa55-3959-4279-a5c7-ffff4a398875
+# ╟─eb08b226-e156-436e-b6ee-0ef7aaa94074
+# ╟─66d7aa55-3959-4279-a5c7-ffff4a398875
 # ╟─3bbbdc7d-47e6-4b09-9bae-305bd7d60e5f
 # ╟─ae337f5e-ebb3-4ba8-87b3-307c132f58ac
 # ╟─0c23b19a-cf0f-4733-885b-9f08fe6dc850
-# ╟─cd6683a5-8a2a-4a3e-9fa5-e65f142016eb
 # ╟─fa7041ad-ace6-432c-9b2d-9568aeaafef5
 # ╟─3622d9d0-3651-4d0d-9a35-0c173bca31c1
+# ╠═985e4fa6-dcb8-4f30-91c5-941234d84dad
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
