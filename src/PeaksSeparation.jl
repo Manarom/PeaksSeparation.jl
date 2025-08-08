@@ -1,13 +1,14 @@
 module PeaksSeparation
     using Optimization, Peaks, StaticArrays,
         OptimizationOptimJL,ForwardDiff,RecipesBase,
-        AllocCheck
+        AllocCheck,Statistics,LinearAlgebra
     export MultiPeaks,
             fit_peaks,
             fit_peaks!,
             split_peaks,
             GaussPeak,
-            LorentzPeak
+            LorentzPeak,
+            VoigtPeak
 
     const default_optimizer = Ref(ParticleSwarm(n_particles=100))
     const fwhm = 2*sqrt(2*log(2.0)) # contant to evaluate the dispersion of Gaussian from peaks's fwhm
@@ -18,17 +19,31 @@ module PeaksSeparation
    
     function ∇gauss(x,μ,σ,a) 
         abs(σ) > 1e-16 || (σ = 1e-16) 
-        fa =  f_gauss(x, μ, σ, 1.0) 
-        fmu =  a * (x - μ) * fa /( σ^2 )
-        (fmu, fmu*(x-μ)/σ ,fa )
+        dfda =  f_gauss(x, μ, σ, 1.0) 
+        dfdmu =  a * (x - μ) * dfda /( σ^2 )
+        return (dfdmu, dfdmu*(x-μ)/σ ,dfda )
     end
 
     f_lorentz(x,μ,σ,a)  = abs(σ)>1e-16 ? a / (1.0 + ((x - μ) / σ) ^ 2) : a / (1.0 + 1e32*(x - μ) ^ 2)
     function ∇lorentz(x,μ,σ,a) 
         abs(σ) > 1e-16 || (σ = 1e-16) 
-        fa = f_lorentz(x,μ,σ,1.0)
-        fmu = 2*a*((x - μ) / σ^2)*fa^2
-        (fmu, fmu*(x-μ)/σ ,fa )
+        dfda = f_lorentz(x,μ,σ,1.0)
+        dfdmu = 2*a*((x - μ) / σ^2)*dfda^2
+        return (dfdmu, dfdmu*(x-μ)/σ ,dfda )
+    end
+
+    f_voigt(x,μ,σ,a,l_frac) = f_gauss(x,μ,σ,a)*(1-l_frac) + f_lorentz(x,μ,σ,a)*l_frac
+    function ∇voigt(x,μ,σ,a,l_frac) 
+        abs(σ) > 1e-16 || (σ = 1e-16) 
+        fl1 = f_lorentz(x, μ, σ, 1.0) 
+        fg1 = f_gauss(x, μ, σ, 1.0) 
+        dfdmu = a * (x - μ) * (fg1 * (1 - l_frac)  + 2 * l_frac * fl1^2) /( σ^2 )
+        return (dfdmu, 
+                dfdmu*(x-μ)/σ, #dfds
+                fg1 * (1 - l_frac) + fl1 * l_frac, #dfda
+                a*(fl1 - fg1) # dfdl 
+                )
+
     end
     # N - is the number of parameters of this component
     abstract type AbstractCurveComponent{N} end
@@ -115,8 +130,9 @@ for i in 1:5 # reserving function for up to five
             new((0.0,0.0),(:b1,:b2),(false,false))
         end
     end
-    # gauss and lorenz peaks types and first derivatives
-   for (peak_name,f_name,grad_name) in zip((:GaussPeak,:LorentzPeak),(:f_gauss,:f_lorentz),(:∇gauss,:∇lorentz))
+    # concrete peaks types 
+    # gauss and lorenz peaks types 
+   for peak_name in (:GaussPeak,:LorentzPeak)
         @eval mutable struct $peak_name <:AbstractPeak{3}
             parameters::NTuple{3,Float64}
             names::NTuple{3,Symbol}
@@ -126,12 +142,29 @@ for i in 1:5 # reserving function for up to five
                 new((mu,sigma,a),(:μ,:σ,:a),(false,false,false),i)
             end
         end
+   end
+   #pseudo-voigt peak
+   mutable struct VoigtPeak <:AbstractPeak{4}
+    parameters::NTuple{4,Float64}
+    names::NTuple{4,Symbol}
+    flags::NTuple{4,Bool}
+    index::Int
+        VoigtPeak(i::Int=1,mu=0.0,sigma=1.0,a=1.0,l_frac=0.5) = begin 
+            new((mu,sigma,a,l_frac),(:μ,:σ,:a,:l_frac),(false,false,false,false),i)
+        end
+    end
+    # generating functions and gradients
+   for (peak_name,f_name,grad_name) in zip((:GaussPeak,:LorentzPeak,:VoigtPeak),
+                            (:f_gauss,:f_lorentz,:f_voigt),
+                            (:∇gauss,:∇lorentz,:∇voigt))
+
         @eval (p::$peak_name)(x) = $f_name(x,getfield(p,:parameters)...)
         @eval ∇(x,p::$peak_name) = $grad_name(x,getfield(p,:parameters)...)
    end
-
-
-
+   is_has_gradient(::Type{P}) where P <: AbstractPeak = P<:GaussPeak || P<:LorentzPeak || P<: VoigtPeak
+   is_has_gradient(::P) where P<:AbstractPeak = is_has_gradient(P)
+   is_has_hessian(::Type{P}) where P<:AbstractPeak = false
+   is_has_hessian(::AbstractPeak) = false
  #peak functions   
     mutable struct MultiPeaks{N,B<:AbstractBaseLine,P<:AbstractPeak,T<:AbstractVector}
         x::T
@@ -321,6 +354,7 @@ function param_estimate(::Type{<:Union{GaussPeak,LorentzPeak}},x,y,indices::Vect
         return ntuple(i->(mus[i],sigmas[i],as[i]),N)
     end
     param_estimate(T::Type{<:Union{GaussPeak,LorentzPeak}},x,y,N::Union{Int,Nothing}) = param_estimate(T,x,y,maxima_indices(y,N))
+    param_estimate(::Type{VoigtPeak},x,y,N::Union{Int,Nothing}) = (param_estimate(GaussPeak,x,y,maxima_indices(y,N))...,0.5)
     
     function fill_starting_vector!(starting_vector,mp::MultiPeaks{PeakNum,BaseType,PeakType}) where {PeakNum,BaseType,PeakType}
         length(starting_vector) == parnumber(mp) || resize!(starting_vector,parnumber(mp))
@@ -431,6 +465,44 @@ function split_peaks(mp::MultiPeaks{N,B,P};
         end
         return o,inds
     end
+    function statistics(mp::MultiPeaks)
+        N = length(mp.x) - 1 # degrees of freedom
+        NmP = N - parnumber(mp) # reg degrees of freedom
+        mean_y0 = mean(mp.y0)
+        SSR = sum(t->(t-mean_y0)^2,mp.y) # regression sum of squares 
+        SSE = sum(t->t^2,mp.r) # sum of square errors
+        SST = sum(t->(t-mean_y0)^2,mp.y0) # total sum of squares
+        return (V = sqrt(SSE/NmP),
+                r=( 1 - SSE/SST),
+                radj=(1 - (N/NmP)*(SSE/SST)),
+                SSE=SSE,
+                SST=SST,
+                SSR=SSR,
+                freedom_degrees = NmP,
+                total_degrees = N )
+    end
+    """
+    covariance(mp::MultiPeaks{N,B,P})
+
+Function to estimate the covariance as an inverse of hessian matrix
+"""
+function covariance(mp::MultiPeaks{N,B,P}) where {N,B<:AbstractBaseLine,P<:AbstractPeak}
+        params = fill_vector_with_pars!(Float64[],mp,resizable=true)
+        npoints = length(mp.x)
+        npars = parnumber(mp)
+        if is_has_gradient(P)
+            grad_fill! = (g,x) -> fill_from_tuples!(g,∇(x,1.0,mp)) 
+        end
+        J = Matrix{Float64}(undef,npoints,npars)
+        H = Matrix{Float64}(undef,npars,npars)
+        for (i,xi) in enumerate(mp.x)
+            ji = @view J[i,:]
+            grad_fill!(ji,xi)
+        end
+        # calculating the approximate hessian J'*J
+        mul!(H,transpose(J),J)
+        return (covariance=pinv(H),jacobian=J,hessian=H)
+    end
     """
     box_constraints(p::MultiPeaks{N}) where N
 
@@ -439,84 +511,43 @@ Evaluates box constraints on the
 function box_constraints(p::MultiPeaks{N,B,P};
             constraints_expansion::Float64=1.0,
             allow_negative_peaks_amplitude::Bool=true,
-            allow_negative_baseline_tangent::Bool=true) where {N,B,P<:Union{GaussPeak,LorentzPeak}}
+            allow_negative_baseline_tangent::Bool=true) where {N,B,P<:Union{GaussPeak,LorentzPeak,VoigtPeak}}
         # method calculates box constraints 
         # of the feasible region (dumb version)
-        mu_bnds = extrema(p.x)
-        s_bnds = (0.0,p.x[end])
-        a_bnds = extrema(p.y0)
-        allow_negative_peaks_amplitude || a_bnds[1] >=0 || (a_bnds=(0.0,a_bnds[2])) 
-        npars = parnumber(p) # total parameters number
+        npars = parnumber(p) # total parameters number in all peaks
+        base_npars = parnumber(B)
+        peaks_npars = npars-base_npars # peaks parameters number 
 
         lb = Vector{Float64}(undef,npars)
         ub = Vector{Float64}(undef,npars)
 
-        base_npars = parnumber(B)
-        peaks_npars = npars-base_npars # peaks parameters number 
-        
+        mu_bnds = extrema(p.x)
+        s_bnds = (0.0,p.x[end])
+        a_bnds = extrema(p.y0)
+
         lb[1] = a_bnds[1]
         ub[1] = a_bnds[2]
 
+        allow_negative_peaks_amplitude || a_bnds[1] >=0 || (a_bnds=(0.0,a_bnds[2])) 
+        
         max_tan = abs(-(a_bnds...)/-(mu_bnds...))
         allow_negative_baseline_tangent ? fill!(view(lb,2:base_npars),-max_tan) : fill!(view(lb,2:base_npars),0.0)
         fill!(view(ub,2:base_npars),max_tan)
 
         _lb = @view lb[base_npars+1:npars]
         _ub = @view ub[base_npars+1:npars]
-
-        fill_from_tuples!(_lb,ntuple(i->(mu_bnds[1],s_bnds[1],a_bnds[1]), Val(N)))
-        fill_from_tuples!(_ub,ntuple(i->(mu_bnds[2],s_bnds[2],a_bnds[2]), Val(N)))
-
+        if P<:VoigtPeak
+            filler_fun_lower = _->(mu_bnds[1],s_bnds[1],a_bnds[1],0.0)
+            filler_fun_upper = _->(mu_bnds[2],s_bnds[2],a_bnds[2],1.0)
+        else
+            filler_fun_lower = _->(mu_bnds[1],s_bnds[1],a_bnds[1])
+            filler_fun_upper = _->(mu_bnds[2],s_bnds[2],a_bnds[2])
+        end
+        fill_from_tuples!(_lb,ntuple(filler_fun_lower, Val(N)))
+        fill_from_tuples!(_ub,ntuple(filler_fun_upper, Val(N)))
         return (lb=constraints_expansion*lb,ub=constraints_expansion*ub)
     end
     #plot recipe
-    @recipe function f(m::MultiPeaks)
-        minorgrid--> true
-        gridlinewidth-->2
-        dpi-->600
-        xlabel-->"Temperature"
-        ylabel-->"DSC disgnal"
-        label-->"y0"
-        linewidth-->3
-        markershape --> :diamond
-        markersize -->3
-        markeralpha-->0.5
-        (out_mat,inds) = split_peaks(m)
-        # N=peak_number(m)
-        for (i,c)in enumerate(eachcol(out_mat))
-            @series begin 
-                label:="p_$(inds[i])"    
-                linewidth:=2
-                fillrange:=0
-                fillalpha:=0.3
-                markershape:=:none
-                (m.x, c)
-            end
-        end
-        @series begin 
-            label:= "Σp_i"    
-            linewidth:=2
-            markershape:=:none
-            (m.x, m.y)
-        end
-        return (m.x,m.y0)
-    end
-    @recipe function f(x,m::AbstractCurveComponent)
-        minorgrid--> true
-        gridlinewidth-->2
-        dpi-->600
-        xlabel-->"Temperature"
-        ylabel-->"DSC disgnal"
-        label-->"y0"
-        linewidth-->3
-        markershape --> :diamond
-        markersize -->3
-        markeralpha-->0.5
-        linewidth-->2
-        fillrange-->0
-        fillalpha-->0.3
-        markershape:=:none
-        return (x,m.(x))
-    end 
+   include("PlotRecipes.jl")
 
 end
