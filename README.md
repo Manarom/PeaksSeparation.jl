@@ -2,11 +2,21 @@
 
 [![Build Status](https://github.com/Manarom/PeaksSeparation.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Manarom/PeaksSeparation.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
-Small package for peaks separation
+Small package for fitting the curve with multippe peaks and baseline function
 
 <p float="left">
   <img src="./assets/peaks.png" width="320"/>
 </p>
+
+Supported peaks types:
+
+- Gaussian
+- Lorentzian
+- Pseudo-Voigt
+
+Supported baseline shapes:
+
+- Polynomial
 
 # Quick start:
 Clone this repository to your local machine in `project_folder` (any name)

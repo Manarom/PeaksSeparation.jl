@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.20.13
+# v0.20.9
 
 using Markdown
 using InteractiveUtils
@@ -18,6 +18,9 @@ end
 
 # ╔═╡ cb0dffa0-678c-11f0-14a2-e1c0a3befdaf
 using CSV,Peaks,Plots,PlutoUI,Optimization,OptimizationOptimJL,Revise,StaticArrays,ForwardDiff,RecipesBase,DataFrames, AllocCheck
+
+# ╔═╡ fa30f47d-fe9c-4308-a46c-b85b4ee61beb
+using LinearAlgebra
 
 # ╔═╡ b37565fd-041d-4661-b1b3-81f6f5b8ea06
 using Main.PeaksSeparation, Main.NetzFileParser
@@ -209,8 +212,8 @@ Optimizer: $(Child(:optimizer,
 				default = def(:optimizer,ParticleSwarm))))
 	
 Peaks type: $(Child(:peaksType, Select([ GaussPeak => "Gaussian",
-					 LorentzPeak => "Lorentzian"
-					],default= GaussPeak))				)
+					 LorentzPeak => "Lorentzian", VoigtPeak=>"Voigt"
+					],default= VoigtPeak))				)
 	
 Number of swarm reruns : $(Child(:try_num,Select(1:20,default=def(:try_num,10))
 	))
@@ -271,9 +274,10 @@ begin
 			sol_c[] = m
 		else
 			m = sol_c[]
-			fit_peaks!(m;optimizer = GradientDescent())
+			fit_peaks!(m;optimizer = LBFGS(),use_constraints=is_cons)
 		end
 		refit
+		m_stat = PeaksSeparation.statistics(m)
 	end
 end;
 
@@ -281,10 +285,16 @@ end;
 plot(m)
 
 # ╔═╡ 77d30493-2021-4d76-891c-d9d872b3050d
-md" Goodness of fit r = $(sqrt(sum(t->^(t,2),m.r)))"
+md""" 
+	Goodness of fit r² = $(m_stat.radj)
+
+	Fitting error std = $(m_stat.V)
+
+	"""
+
 
 # ╔═╡ fee673a1-7b44-4712-aa2a-81edeea99faa
-md"Show peaks indices : $(@bind show_peaks PlutoUI.MultiCheckBox(0:PeaksSeparation.peak_number(m)))"
+md"Show peaks indices : $(@bind show_peaks PlutoUI.MultiCheckBox(0:PeaksSeparation.peaknumber(m)))"
 
 # ╔═╡ 55a574fa-0ee8-4be3-ba06-4140849b8e35
 begin 
@@ -353,7 +363,13 @@ begin
 end 
 
 # ╔═╡ 985e4fa6-dcb8-4f30-91c5-941234d84dad
-plot(x,m_p[3])
+cov_mat_out = PeaksSeparation.covariance_matrix(m)
+
+# ╔═╡ 3df51a84-4cae-485e-9038-558ac9fdaf0d
+pars_vect = PeaksSeparation.fill_vector_with_pars!(Float64[],m,resizable=true);
+
+# ╔═╡ 94647f04-a54c-4722-bee3-c26eb2337cf3
+@. string.(pars_vect)*"+-"*string(sqrt.(cov_mat_out.variance))
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -362,6 +378,7 @@ AllocCheck = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
 OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
 Peaks = "18e31ff7-3703-566c-8e60-38913d67486b"
@@ -392,7 +409,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "22648ef6cb2ff320d7616fd3133377a6f0c3c38f"
+project_hash = "9cdb829e22a3b4557737b8b3726d8e8496bf9076"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "e2478490447631aedba0823d4d7a80b2cc8cdb32"
@@ -2318,6 +2335,7 @@ version = "1.8.1+0"
 
 # ╔═╡ Cell order:
 # ╠═cb0dffa0-678c-11f0-14a2-e1c0a3befdaf
+# ╠═fa30f47d-fe9c-4308-a46c-b85b4ee61beb
 # ╠═e7acdbd5-33e6-47e0-9af0-042e39295891
 # ╟─220e00cc-7797-498a-bd55-70c3ae89ea64
 # ╠═b37565fd-041d-4661-b1b3-81f6f5b8ea06
@@ -2344,7 +2362,7 @@ version = "1.8.1+0"
 # ╟─b0097572-65d6-460b-9fed-768dcc20957a
 # ╟─022d5ec8-cde9-4be0-9441-3afa77f4359f
 # ╟─5f78828b-3558-4889-9922-fd1b834961db
-# ╠═241e833c-6c8c-4028-8f7e-c2d1174a8e9a
+# ╟─241e833c-6c8c-4028-8f7e-c2d1174a8e9a
 # ╟─55a574fa-0ee8-4be3-ba06-4140849b8e35
 # ╟─77d30493-2021-4d76-891c-d9d872b3050d
 # ╟─fee673a1-7b44-4712-aa2a-81edeea99faa
@@ -2360,5 +2378,7 @@ version = "1.8.1+0"
 # ╟─fa7041ad-ace6-432c-9b2d-9568aeaafef5
 # ╟─3622d9d0-3651-4d0d-9a35-0c173bca31c1
 # ╠═985e4fa6-dcb8-4f30-91c5-941234d84dad
+# ╠═3df51a84-4cae-485e-9038-558ac9fdaf0d
+# ╠═94647f04-a54c-4722-bee3-c26eb2337cf3
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
