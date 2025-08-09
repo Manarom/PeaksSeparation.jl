@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.20.13
+# v0.20.9
 
 using Markdown
 using InteractiveUtils
@@ -294,7 +294,7 @@ md"""
 
 
 # ╔═╡ fee673a1-7b44-4712-aa2a-81edeea99faa
-md"Show peaks indices : $(@bind show_peaks PlutoUI.MultiCheckBox(0:PeaksSeparation.peak_number(m)))"
+md"Show peaks indices : $(@bind show_peaks PlutoUI.MultiCheckBox(0:PeaksSeparation.peaknumber(m)))"
 
 # ╔═╡ 55a574fa-0ee8-4be3-ba06-4140849b8e35
 begin 
@@ -363,34 +363,13 @@ begin
 end 
 
 # ╔═╡ 985e4fa6-dcb8-4f30-91c5-941234d84dad
-out = PeaksSeparation.covariance(m)
-
-# ╔═╡ 44f89c7a-459a-4dae-9203-2c64e529444e
-out.jacobian
-
-# ╔═╡ 29390fbc-9b1c-4037-9ea9-8162b34f2545
-hh = similar(out.hessian)
-
-# ╔═╡ 7d76ca95-c36f-48e0-88cc-5bc6bf493fe0
-out.jacobian
-
-# ╔═╡ 7cdd60e6-0917-4826-9e52-f4b7adb917e0
-mul!(hh,transpose(out.jacobian),out.jacobian)
-
-# ╔═╡ 008e3ad5-df5a-49dd-bd2c-5fc5a74190ab
-sqrt.(diag(inv(out.hessian))*m_stat.SSE/m_stat.freedom_degrees)
-
-# ╔═╡ b69b1227-b87d-4ee3-a603-10b251292749
-mul!
+cov_mat_out = PeaksSeparation.covariance_matrix(m)
 
 # ╔═╡ 3df51a84-4cae-485e-9038-558ac9fdaf0d
-pars_vect = PeaksSeparation.fill_vector_with_pars!(Float64[],m,resizable=true)
+pars_vect = PeaksSeparation.fill_vector_with_pars!(Float64[],m,resizable=true);
 
-# ╔═╡ 27823e63-4924-4aca-90a8-6d6209a0c9e8
-PeaksSeparation.fill_from_tuples!(Float64[], PeaksSeparation.∇(300.0,1.0,m),resizable=true)
-
-# ╔═╡ 56b440e4-3207-4ddb-8843-b05c8fd6036f
-f_h = x->ForwardDiff.hessian()
+# ╔═╡ 94647f04-a54c-4722-bee3-c26eb2337cf3
+@. string.(pars_vect)*"+-"*string(sqrt.(cov_mat_out.variance))
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2399,14 +2378,7 @@ version = "1.8.1+0"
 # ╟─fa7041ad-ace6-432c-9b2d-9568aeaafef5
 # ╟─3622d9d0-3651-4d0d-9a35-0c173bca31c1
 # ╠═985e4fa6-dcb8-4f30-91c5-941234d84dad
-# ╠═44f89c7a-459a-4dae-9203-2c64e529444e
-# ╠═29390fbc-9b1c-4037-9ea9-8162b34f2545
-# ╠═7d76ca95-c36f-48e0-88cc-5bc6bf493fe0
-# ╠═7cdd60e6-0917-4826-9e52-f4b7adb917e0
-# ╠═008e3ad5-df5a-49dd-bd2c-5fc5a74190ab
-# ╠═b69b1227-b87d-4ee3-a603-10b251292749
 # ╠═3df51a84-4cae-485e-9038-558ac9fdaf0d
-# ╠═27823e63-4924-4aca-90a8-6d6209a0c9e8
-# ╠═56b440e4-3207-4ddb-8843-b05c8fd6036f
+# ╠═94647f04-a54c-4722-bee3-c26eb2337cf3
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

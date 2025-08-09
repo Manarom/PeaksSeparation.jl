@@ -55,6 +55,7 @@ eval_to!(y,cc::AbstractCurveComponent,x) = map!(cc,y,x)
  Adds result of curve component (like peak or baseline) evaluation to the vector y
 """
 add_to!(y,cc::AbstractCurveComponent,x) = @. y += cc(x)
+add_to!(y,cc::AbstractCurveComponent,x,bynary_operator::Function) = @. y = bynary_operator(y,cc(x))
     function add_to!(y,curve_component_iterator,x)
         for cc in curve_component_iterator 
             add_to!(y,cc,x)
@@ -84,7 +85,7 @@ add_to!(y,cc::AbstractCurveComponent,x) = @. y += cc(x)
         getfield(cc,field)
     end
     # baseline supertype
-    abstract  type AbstractBaseLine{N}<:AbstractCurveComponent{N} end
+    abstract type AbstractBaseLine{N}<:AbstractCurveComponent{N} end
     abstract type PolynomialBaseLine{N}<:AbstractBaseLine{N} end
     abstract type AbstractPeak{N}<:AbstractCurveComponent{N} end
 
@@ -204,11 +205,11 @@ end
 """
     is_new_params(p,mp::MultiPeaks{N,B,P}) where {N,B,P}
 
-TBW
+Checks if parameters in vector p are the same as currently in settled in for 
+this object (used to check if the gradient should be recalculated)
 """
 function is_new_params(p,mp::MultiPeaks{N,B,P}) where {N,B,P}
     length(p) == parnumber(mp) || return true
-
     Base_pars_number = parnumber(B)
     Peak_pars_number = parnumber(P)
     _pb = @view p[1:Base_pars_number]
@@ -227,10 +228,17 @@ function is_new_params(p,mp::MultiPeaks{N,B,P}) where {N,B,P}
     end
     return false
 end
+"""
+    parnumber(::MultiPeaks{N,B,P}) where {N,B,P}
+
+Total number of parameters used to fit the curve 
+"""
 parnumber(::MultiPeaks{N,B,P}) where {N,B,P} = parnumber(B)+ N*parnumber(P) # total parnumber of the curve 
+peaknumber(::MultiPeaks{N}) where N = N
 #
     """
     add_baseline!(mp::MultiPeaks)
+
 Adds baseline to fitting results
 """
 add_baseline!(mp::MultiPeaks) = add_to!(mp.y,mp.baseline,mp.x)
@@ -244,7 +252,7 @@ add_peaks!(mp::MultiPeaks) = add_to!(mp.y,mp.peaks,mp.x)
     """
     fill_y!(mp::MultiPeaks)
 
-Evaluates calculated values and fits y 
+Evaluates curve fitter and fills y field 
 """
 function fill_y!(mp::MultiPeaks) 
         fill!(mp.y,0.0)
@@ -255,7 +263,7 @@ function fill_y!(mp::MultiPeaks)
     """
     residual!(mp::MultiPeaks{N}) where N
 
-Evaluates residual vector
+Evaluates and fills the residual vector
 """
 function residual!(mp::MultiPeaks{N}) where N
         fill_y!(mp)
@@ -268,6 +276,7 @@ function residual!(mp::MultiPeaks{N}) where N
     fill_pars!(mp::MultiPeaks{N},x) where N
 
 Fills all curve components parameters from iterable object x
+
 """
 function fill_pars!(mp::MultiPeaks{N},x) where N
         itr = Iterators.Stateful(x)
@@ -279,33 +288,42 @@ function fill_pars!(mp::MultiPeaks{N},x) where N
     """
     discr(x,mp::MultiPeaks{N}) where N
 
-Evaluates discrepancy value
+Evaluates discrepancy value 
 """
 function discr(x,mp::MultiPeaks{N}) where N
         fill_pars!(mp,x)
         return sum(sqr,mp.r)/2
     end
+
     discr_fun(x,p) = x->discr(x,p)
-    # result = tuple((x * factor for x in t)...)
+    """
+    ∇(xi,ri,mp::MultiPeaks{N}) where N
 
-    ∇(xi,ri,mp::MultiPeaks{N}) where N =  ntuple(i->tuple_mult(∇(xi,mp[i-1]),ri), Val(N+1))
+Gradient of fitter with respect to all fitting variables, returns a Tuple of Tuples 
+each tuple contains the gradient value (xi and ri are supposed to be a single number)  
+"""
+∇(xi,ri,mp::MultiPeaks{N}) where N =  ntuple(i->tuple_mult(∇(xi,mp[i-1]),ri), Val(N+1))
 
-    function grad!(g::AbstractVector, x ,mp::MultiPeaks{N,B,P}) where {N,B,P}
+"""
+    grad!(g::AbstractVector, x ,mp::MultiPeaks{N,B,P}) where {N,B,P}
+
+Fills in-pace calculated gradient to g vector 
+"""
+function grad!(g::AbstractVector, x ,mp::MultiPeaks{N,B,P}) where {N,B,P}
         !is_new_params(x,mp) || fill_pars!(mp,x) 
         fill!(g,0.0)
         for (i,xi) in enumerate(mp.x)
             ri = getindex(getfield(mp,:r),i)
             add_from_tuples!(g,∇(xi,ri,mp))    
         end
-        #@show sum(g.*g)
     end
+
+ 
     """
     fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
 
 Puts all content of args (tuple of tuple or vector of vectors et.c) into a single vector
 """
-
-    peak_number(::MultiPeaks{N}) where N = N
     function fill_vector_with_pars!(v,p::MultiPeaks{N};resizable::Bool=false) where N 
         fill_from_tuples!(v,ntuple(i->parameters(p[i-1]), Val(N+1)),resizable=resizable)
     end
@@ -336,10 +354,20 @@ function maxima_indices(y,N::Union{Int,Nothing})
         return idxs
     end
     """
-    param_estimate(::Type{GaussPeak},x,y,indices::Vector{Int})
+    param_estimate(::Type{<:AbstractPeak},x,y,indices::Vector{Int})
 
-Finds peaks and estimates 
+Finds peaks and estimates and estimates the starting values of peaks location and width using Peaks.jl 
+package function peakwidths.
+
+Input variables:
+x coordinate
+y values 
+indices  - indices in x vector of peaks maxima location
+
+Returns tuple of tuples with (peak location,peaks width, peak amplitude) the number of 
+tuples is the same as the number indices  
 """
+function param_estimate(::Type{<:AbstractPeak},x,y,indices::Vector{Int}) end
 function param_estimate(::Type{<:Union{GaussPeak,LorentzPeak}},x,y,indices::Vector{Int})
         N = length(indices)
         as = view(y,indices)
@@ -353,10 +381,24 @@ function param_estimate(::Type{<:Union{GaussPeak,LorentzPeak}},x,y,indices::Vect
         mus = @view x[indices]
         return ntuple(i->(mus[i],sigmas[i],as[i]),N)
     end
-    param_estimate(T::Type{<:Union{GaussPeak,LorentzPeak}},x,y,N::Union{Int,Nothing}) = param_estimate(T,x,y,maxima_indices(y,N))
-    param_estimate(::Type{VoigtPeak},x,y,N::Union{Int,Nothing}) = (param_estimate(GaussPeak,x,y,maxima_indices(y,N))...,0.5)
+
+    """
+    param_estimate(T::Type{<:AbstractPeak},x,y,N::Union{Int,Nothing})
+
+
+The same as [`param_estimate(::Type{<:Union{GaussPeak,LorentzPeak}},x,y,indices::Vector{Int})`](@ref) but 
+the number of peaks is specified by N
+"""
+function param_estimate(T::Type{<:AbstractPeak},x,y,N::Union{Int,Nothing})  throw(DomainError("Undefined for $(T)")) end
+param_estimate(T::Type{<:Union{GaussPeak,LorentzPeak}},x,y,N::Union{Int,Nothing}) = param_estimate(T,x,y,maxima_indices(y,N))
+param_estimate(::Type{VoigtPeak},x,y,N::Union{Int,Nothing}) = (param_estimate(GaussPeak,x,y,maxima_indices(y,N))...,0.5)
     
-    function fill_starting_vector!(starting_vector,mp::MultiPeaks{PeakNum,BaseType,PeakType}) where {PeakNum,BaseType,PeakType}
+    """
+    fill_starting_vector!(starting_vector,mp::MultiPeaks{PeakNum,BaseType,PeakType}) where {PeakNum,BaseType,PeakType}
+
+Fills starting vector for the optimization by 
+"""
+function fill_starting_vector!(starting_vector,mp::MultiPeaks{PeakNum,BaseType,PeakType}) where {PeakNum,BaseType,PeakType}
         length(starting_vector) == parnumber(mp) || resize!(starting_vector,parnumber(mp))
         base_param_number = parnumber(BaseType)
         miny = minimum(mp.y0)
@@ -366,7 +408,13 @@ function param_estimate(::Type{<:Union{GaussPeak,LorentzPeak}},x,y,indices::Vect
                     ;resizable=false)
     end
     int_floor = Int ∘ floor
-    function fit_peaks!(p::MultiPeaks;kwargs...)
+
+    """
+    fit_peaks!(p::MultiPeaks;kwargs...)
+
+Refits peaks returns optimization solution 
+"""
+function fit_peaks!(p::MultiPeaks;kwargs...)
         starting_vector =  fill_vector_with_pars!(Float64[],p,resizable=true)
         return fit_peaks(       nothing,
                                 nothing;
@@ -376,7 +424,35 @@ function param_estimate(::Type{<:Union{GaussPeak,LorentzPeak}},x,y,indices::Vect
                                 use_constraints =false,
                                 kwargs...)
     end
-    function fit_peaks(x::T,y::T ;
+
+    """
+    fit_peaks(x::T,y::T ;
+                        N::Union{Int,Nothing}=nothing,
+                        PeakType::Type{<:AbstractPeak}=GaussPeak,
+                        BaseLineType::Type{<:AbstractBaseLine}=LinearBaseLine,
+                        starting_vector::Union{Nothing,AbstractVector} = nothing,
+                        optimizer = nothing,
+                        p::Union{Nothing,MultiPeaks} = nothing,
+                        use_constraints::Bool=true,
+                        constraints_expansion::Float64=1.0,
+                        allow_negative_peaks_amplitude::Bool = true,
+                        allow_negative_baseline_tangent::Bool = true) where T<:Union{Nothing,AbstractVector}
+
+x - coordinates
+y - curve
+PeaksType  - all peaks in curve are of the same type
+BaseLineType  - type of base line 
+starting_vector - staring parameters can be provided esternally
+optimizer - any supported optimizer from Optimization.jl package which does not use 
+            the second derivative
+p - can refit MultiPeaks object (if it is provided it prevails all other arguments which can be 
+taken from it like x,y,starting_vector, peaks type and baseline type. 
+use_constraints - true if box_constraints are used
+constraints_expansion - coefficient of constraintes expansion (shrinks of dilates the box)
+allow_negative_peaks_amplitude - if true all amplitude
+allow_negative_baseline_tangent - if false tangent is supposed to gradually increase
+"""
+function fit_peaks(x::T,y::T ;
                         N::Union{Int,Nothing}=nothing,
                         PeakType::Type{<:AbstractPeak}=GaussPeak,
                         BaseLineType::Type{<:AbstractBaseLine}=LinearBaseLine,
@@ -389,7 +465,7 @@ function param_estimate(::Type{<:Union{GaussPeak,LorentzPeak}},x,y,indices::Vect
                         allow_negative_baseline_tangent::Bool = true) where T<:Union{Nothing,AbstractVector}
         
         is_p_provided = !isnothing(p)
-        !is_p_provided || (N=peak_number(p))
+        !is_p_provided || (N=peaknumber(p))
         #is_fixed_peaks_number = !isnothing(N)
         
         if isnothing(starting_vector)
@@ -465,7 +541,12 @@ function split_peaks(mp::MultiPeaks{N,B,P};
         end
         return o,inds
     end
-    function statistics(mp::MultiPeaks)
+    """
+    statistics(mp::MultiPeaks)
+
+Evaluates basic statistics on peaks fitter structure
+"""
+function statistics(mp::MultiPeaks)
         N = length(mp.x) - 1 # degrees of freedom
         NmP = N - parnumber(mp) # reg degrees of freedom
         mean_y0 = mean(mp.y0)
@@ -482,16 +563,22 @@ function split_peaks(mp::MultiPeaks{N,B,P};
                 total_degrees = N )
     end
     """
-    covariance(mp::MultiPeaks{N,B,P})
+    covariance_matrix(mp::MultiPeaks{N,B,P}) where {N,B<:AbstractBaseLine,P<:AbstractPeak}
 
-Function to estimate the covariance as an inverse of hessian matrix
+Function to estimate the covariance as a pseudo-inverse of approximate hessian matrix:
+
+Cov = Hₐ⁻¹*SSE/(N-P) where Hₐ = (J'*J), J is the Jacobian
+
 """
-function covariance(mp::MultiPeaks{N,B,P}) where {N,B<:AbstractBaseLine,P<:AbstractPeak}
+function covariance_matrix(mp::MultiPeaks{N,B,P}) where {N,B<:AbstractBaseLine,P<:AbstractPeak}
         params = fill_vector_with_pars!(Float64[],mp,resizable=true)
         npoints = length(mp.x)
         npars = parnumber(mp)
         if is_has_gradient(P)
             grad_fill! = (g,x) -> fill_from_tuples!(g,∇(x,1.0,mp)) 
+        else # if gradient is not provided 
+            #   TBW
+ #           grad_fill! = (g,x) -> copyto!(g, ForwardDiff.gradient())
         end
         J = Matrix{Float64}(undef,npoints,npars)
         H = Matrix{Float64}(undef,npars,npars)
@@ -501,12 +588,14 @@ function covariance(mp::MultiPeaks{N,B,P}) where {N,B<:AbstractBaseLine,P<:Abstr
         end
         # calculating the approximate hessian J'*J
         mul!(H,transpose(J),J)
-        return (covariance=pinv(H),jacobian=J,hessian=H)
+        stat_struct = statistics(mp)
+        cov_mat = pinv(H)*stat_struct.SSE/stat_struct.freedom_degrees
+        return (covariance = cov_mat,variance = diag(cov_mat),jacobian=J,hessian=H)
     end
     """
     box_constraints(p::MultiPeaks{N}) where N
 
-Evaluates box constraints on the 
+Evaluates box constraints on the peaks parameters 
 """
 function box_constraints(p::MultiPeaks{N,B,P};
             constraints_expansion::Float64=1.0,
