@@ -1,6 +1,6 @@
-using Plots,BenchmarkTools,Revise,Peaks,Optimization,CSV,DataFrames,OptimizationOptimJL,ForwardDiff
+using Plots,BenchmarkTools,Peaks,Optimization,CSV,DataFrames,OptimizationOptimJL,ForwardDiff
 using Profile
-includet("PeaksSeparation.jl")
+include("PeaksSeparation.jl")
 
 f(x,μ,σ,a) = exp(- 0.5* ^(x-μ,2)/(σ^2))*a
 f_g(μ,σ,a) = x->f(x,μ,σ,a)
@@ -108,3 +108,16 @@ p1
 plot(p)
 
 
+args_names = tuple()
+args_vals = tuple() 
+for (i,name) in enumerate((:A,:B,:C))
+    args_names = (args_names...,Symbol("b$(i)"))
+    args_vals = (args_vals...,0.0)
+    @eval struct $name
+        names :: NTuple{$i,Symbol}
+        vals :: NTuple{$i,Float64}
+        $name()=begin
+            new($args_names,$args_vals)
+        end
+    end
+end

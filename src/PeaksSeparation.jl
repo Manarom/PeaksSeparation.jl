@@ -2,13 +2,18 @@ module PeaksSeparation
     using Optimization, Peaks, StaticArrays,
         OptimizationOptimJL,ForwardDiff,RecipesBase,
         AllocCheck,Statistics,LinearAlgebra
+        
     export MultiPeaks,
             fit_peaks,
             fit_peaks!,
             split_peaks,
             GaussPeak,
             LorentzPeak,
-            VoigtPeak
+            VoigtPeak,
+            ConstantBaseLine,
+            LinearBaseLine,
+            QuadraticBaseLine,
+            CubicBaseLine
 
     const default_optimizer = Ref(ParticleSwarm(n_particles=100))
     const fwhm = 2*sqrt(2*log(2.0)) # contant to evaluate the dispersion of Gaussian from peaks's fwhm
@@ -122,15 +127,25 @@ for i in 1:5 # reserving function for up to five
     end
 
     (bl::PolynomialBaseLine)(x) = @evalpoly(x,getfield(bl,:parameters)...)
-
-    mutable struct LinearBaseLine<:PolynomialBaseLine{2}
-        parameters::NTuple{2,Float64}
-        names::NTuple{2,Symbol}
-        flags::NTuple{2,Bool}
-        LinearBaseLine() = begin 
-            new((0.0,0.0),(:b1,:b2),(false,false))
+    # generating concrete polynomial baseline type up to 0...3
+    _names = Symbol[]
+    _pars = Float64[] 
+    _flags = Bool[]
+    for (i,bl_name) in enumerate((:ConstantBaseLine,:LinearBaseLine,:QuadraticBaseLine,:CubicBaseLine))
+        push!(_names,Symbol("b$(i)"))
+        push!(_pars,0.0)
+        push!(_flags,false)
+        args = (Tuple(_pars),Tuple(_names),Tuple(_flags))
+        @eval mutable struct $bl_name <: PolynomialBaseLine{$i}
+        parameters::NTuple{$i,Float64}
+        names::NTuple{$i,Symbol}
+        flags::NTuple{$i,Bool}
+        $bl_name() = begin 
+                new($args...)
+            end
         end
     end
+    #_names = nothing;_pars = nothing;_flags = nothing
     # concrete peaks types 
     # gauss and lorenz peaks types 
    for peak_name in (:GaussPeak,:LorentzPeak)
@@ -403,7 +418,7 @@ function fill_starting_vector!(starting_vector,mp::MultiPeaks{PeakNum,BaseType,P
         base_param_number = parnumber(BaseType)
         miny = minimum(mp.y0)
         return fill_from_tuples!(starting_vector,  
-                    (ntuple(t->miny,base_param_number),
+                    ((miny,),ntuple(_->0.0,base_param_number-1),
                     param_estimate(PeakType,mp.x,mp.y0,PeakNum)...)
                     ;resizable=false)
     end

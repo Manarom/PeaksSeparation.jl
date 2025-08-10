@@ -20,7 +20,7 @@ end
 using CSV,Peaks,Plots,PlutoUI,Optimization,OptimizationOptimJL,Revise,StaticArrays,ForwardDiff,RecipesBase,DataFrames, AllocCheck
 
 # ╔═╡ fa30f47d-fe9c-4308-a46c-b85b4ee61beb
-using LinearAlgebra
+using LinearAlgebra,Statistics
 
 # ╔═╡ b37565fd-041d-4661-b1b3-81f6f5b8ea06
 using Main.PeaksSeparation, Main.NetzFileParser
@@ -210,6 +210,9 @@ Optimizer: $(Child(:optimizer,
 					SimulatedAnnealing=>
 					"SimulatedAnnealing",LBFGS=>"LBFGS"],
 				default = def(:optimizer,ParticleSwarm))))
+
+Baseline type: $(Child(:baselineType, Select( [ConstantBaseLine=>"const",
+	LinearBaseLine=>"linear", QuadraticBaseLine=>"quadratic", CubicBaseLine=> "cubic"],default = LinearBaseLine)))
 	
 Peaks type: $(Child(:peaksType, Select([ GaussPeak => "Gaussian",
 					 LorentzPeak => "Lorentzian", VoigtPeak=>"Voigt"
@@ -258,6 +261,7 @@ begin
 									  use_constraints=is_cons && is_swarm,
 									  optimizer = UU.optimizer(),
 									  PeakType = UU.peaksType,
+									  BaseLineType = UU.baselineType,
 									 allow_negative_peaks_amplitude = UU.allow_endo,
 									 allow_negative_baseline_tangent = UU.allow_negative_basline)
 					push!(trial_vect,m)
@@ -267,6 +271,7 @@ begin
 				(s,m) = fit_peaks(x_data,y_data,N=N_peaks,
 								  use_constraints=is_cons,
 								  PeakType = UU.peaksType,
+								  BaseLineType = UU.baselineType,
 								  optimizer = UU.optimizer(),
 							      allow_negative_peaks_amplitude = UU.allow_endo,
 									 allow_negative_baseline_tangent = UU.allow_negative_basline )
@@ -369,7 +374,7 @@ cov_mat_out = PeaksSeparation.covariance_matrix(m)
 pars_vect = PeaksSeparation.fill_vector_with_pars!(Float64[],m,resizable=true);
 
 # ╔═╡ 94647f04-a54c-4722-bee3-c26eb2337cf3
-@. string.(pars_vect)*"+-"*string(sqrt.(cov_mat_out.variance))
+@. string.(pars_vect)*" +- "*string(sqrt.(cov_mat_out.variance))
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -387,6 +392,7 @@ PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
 AllocCheck = "~0.2.2"
@@ -409,7 +415,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "9cdb829e22a3b4557737b8b3726d8e8496bf9076"
+project_hash = "a1d638c702e4e1ef9f8a04a0022fe35c4be94f5a"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "e2478490447631aedba0823d4d7a80b2cc8cdb32"
@@ -2357,7 +2363,7 @@ version = "1.8.1+0"
 # ╟─ea56f950-0724-4f3b-82e4-9ff73928b923
 # ╟─f80f2324-4a20-4bc2-80de-08b27eabbb5b
 # ╟─2fbbe44b-ebc1-49c6-929c-1efbbb55b84b
-# ╠═cfcaa806-abbe-4fe0-9c9d-5947a5c8a876
+# ╟─cfcaa806-abbe-4fe0-9c9d-5947a5c8a876
 # ╟─59e483cd-cfa2-417f-a4bf-535a47c39d46
 # ╟─b0097572-65d6-460b-9fed-768dcc20957a
 # ╟─022d5ec8-cde9-4be0-9441-3afa77f4359f
