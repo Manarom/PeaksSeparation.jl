@@ -20,7 +20,7 @@ end
 using CSV,Peaks,Plots,PlutoUI,Optimization,OptimizationOptimJL,Revise,StaticArrays,ForwardDiff,RecipesBase,DataFrames, AllocCheck
 
 # ╔═╡ fa30f47d-fe9c-4308-a46c-b85b4ee61beb
-using LinearAlgebra,Statistics
+using LinearAlgebra,Statistics,QuadGK
 
 # ╔═╡ b37565fd-041d-4661-b1b3-81f6f5b8ea06
 using Main.PeaksSeparation, Main.NetzFileParser
@@ -389,6 +389,7 @@ OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
 Peaks = "18e31ff7-3703-566c-8e60-38913d67486b"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
@@ -404,6 +405,7 @@ OptimizationOptimJL = "~0.4.3"
 Peaks = "~0.5.3"
 Plots = "~1.40.14"
 PlutoUI = "~0.7.65"
+QuadGK = "~2.11.2"
 RecipesBase = "~1.3.4"
 Revise = "~3.8.0"
 StaticArrays = "~1.9.13"
@@ -415,7 +417,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "a1d638c702e4e1ef9f8a04a0022fe35c4be94f5a"
+project_hash = "5eb555c5ac41eae1ba30b53f1ca90825df8a4a4a"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "e2478490447631aedba0823d4d7a80b2cc8cdb32"
@@ -1635,6 +1637,18 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Qt6Base_jll", "Qt6Declarative_jll"
 git-tree-sha1 = "2766344a35a1a5ec1147305c4b343055d7c22c90"
 uuid = "e99dba38-086e-5de3-a5b1-6e4c66e897c3"
 version = "6.8.2+0"
+
+[[deps.QuadGK]]
+deps = ["DataStructures", "LinearAlgebra"]
+git-tree-sha1 = "9da16da70037ba9d701192e27befedefb91ec284"
+uuid = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
+version = "2.11.2"
+
+    [deps.QuadGK.extensions]
+    QuadGKEnzymeExt = "Enzyme"
+
+    [deps.QuadGK.weakdeps]
+    Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
 
 [[deps.REPL]]
 deps = ["InteractiveUtils", "Markdown", "Sockets", "StyledStrings", "Unicode"]
