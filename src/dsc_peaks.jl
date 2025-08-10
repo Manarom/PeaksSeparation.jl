@@ -374,7 +374,7 @@ cov_mat_out = PeaksSeparation.covariance_matrix(m)
 pars_vect = PeaksSeparation.fill_vector_with_pars!(Float64[],m,resizable=true);
 
 # ╔═╡ 94647f04-a54c-4722-bee3-c26eb2337cf3
-@. string.(pars_vect)*" +- "*string(sqrt.(cov_mat_out.variance))
+@. string.(pars_vect)*" +- "*string(sqrt.(abs.(cov_mat_out.variance)))
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
