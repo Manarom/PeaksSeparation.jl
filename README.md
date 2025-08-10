@@ -34,6 +34,6 @@ In julia REPL run:
   p[1] # first peak etc
   using Plots
   plot(p)  # plots peaks
-  fit_peaks!(p,PeakType=LorentzPeak) # additional fitting 
+  fit_peaks!(p) # additional fitting 
 ```
 Pluto [notebook](https://github.com/Manarom/PeaksSeparation.jl/blob/main/src/dsc_peaks.jl) is also available

@@ -1,8 +1,9 @@
 module PeaksSeparation
     using Optimization, Peaks, StaticArrays,
         OptimizationOptimJL,ForwardDiff,RecipesBase,
-        AllocCheck,Statistics,LinearAlgebra
-        
+        AllocCheck,Statistics,LinearAlgebra,
+        QuadGK
+
     export MultiPeaks,
             fit_peaks,
             fit_peaks!,
@@ -48,7 +49,6 @@ module PeaksSeparation
                 fg1 * (1 - l_frac) + fl1 * l_frac, #dfda
                 a*(fl1 - fg1) # dfdl 
                 )
-
     end
     # N - is the number of parameters of this component
     abstract type AbstractCurveComponent{N} end
@@ -93,7 +93,40 @@ add_to!(y,cc::AbstractCurveComponent,x,bynary_operator::Function) = @. y = bynar
     abstract type AbstractBaseLine{N}<:AbstractCurveComponent{N} end
     abstract type PolynomialBaseLine{N}<:AbstractBaseLine{N} end
     abstract type AbstractPeak{N}<:AbstractCurveComponent{N} end
+    """
+    peaks_distance(p1::AbstractCurveComponent,p2::AbstractCurveComponent)
 
+Evaluates Euclidean distance between two curves (including arbitrary shape peaks)
+as ∫(p₁(x)-p₂(x))²dx/(∫p₁²(x)dx + ∫p₂²(x)dx) = I₁₂/(I₁ + I₂)
+
+retuns a tupe of distance and error functions thich is evaluated as:
+
+error = √(e₁₂/(I₁ + I₂))² + (e₁² + e₂²)/(I₁ + I₂)⁴ 
+
+"""
+function peaks_distance(p1::T,p2::P) where {T<:AbstractCurveComponent,P<:AbstractCurveComponent}
+        f1 = x->^(p1(x),2)
+        f2 = x->^(p2(x),2)
+        f  = x-> ^(p1(x)-p2(x),2)
+        tasks = Vector{Task}(undef, 3)
+        out = Vector{NTuple{2,Float64}}(undef,3)
+        Threads.@sync begin
+            for (i,fi) in enumerate((f,f1,f2))
+                tasks[i] = Threads.@spawn QuadGK.quadgk(fi,-Inf,Inf)
+            end
+        end
+        map!(fetch,out,tasks)
+        (f1_f2,e1_e2) = out[1] 
+        (f1_m,    e1) = out[2]
+        (f2_m,    e2) = out[3]
+        e1 = e1^2
+        e2 = e2^2
+        dist = f1_f2/(f1_m + f2_m) # integral Euclidean-like distance between functions
+        e = sqrt(sum(t->t^2,
+                        (e1_e2/(f1_m + f2_m) ,(e1+e2)/^(f1_m + f2_m,2)) # error estimation 
+                    )) # error estimation 
+        return (dist, e)   
+    end
     """
     fill_pars!(curve_component_iterator,itr)
 
@@ -173,9 +206,9 @@ for i in 1:5 # reserving function for up to five
    for (peak_name,f_name,grad_name) in zip((:GaussPeak,:LorentzPeak,:VoigtPeak),
                             (:f_gauss,:f_lorentz,:f_voigt),
                             (:∇gauss,:∇lorentz,:∇voigt))
-
-        @eval (p::$peak_name)(x) = $f_name(x,getfield(p,:parameters)...)
-        @eval ∇(x,p::$peak_name) = $grad_name(x,getfield(p,:parameters)...)
+        #parnmb = parnumber(eval(peak_name))
+        @eval (p::$peak_name)(x::T) where T= $f_name(x,getfield(p,:parameters)...)::T
+        @eval ∇(x,p::$peak_name)= $grad_name(x,getfield(p,:parameters)...)
    end
    is_has_gradient(::Type{P}) where P <: AbstractPeak = P<:GaussPeak || P<:LorentzPeak || P<: VoigtPeak
    is_has_gradient(::P) where P<:AbstractPeak = is_has_gradient(P)
