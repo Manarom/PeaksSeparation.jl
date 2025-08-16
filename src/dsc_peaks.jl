@@ -41,17 +41,33 @@ end;
 # ╔═╡ 699e56fd-ff6f-4361-a822-7779942616db
 f_g(μ,σ,a)=x->exp(- ^(x-μ,2)/(2*σ^2))*a
 
+# ╔═╡ b80397a4-946b-40ab-866f-475c3e9e0efa
+@bind test_peak_type Select([PeaksSeparation.f_gauss=>:Gauss,
+							PeaksSeparation.f_voigt =>:Voigt,
+							PeaksSeparation.f_lorentz=>:Lorentz,
+							PeaksSeparation.f_weibull=>:Webull])
+
 # ╔═╡ 91f65aa7-7692-4299-9575-d9fded0797a4
-md" μ = $(@bind mu_test Slider(100:1:1000,default=200,show_value=true))"
+md" μ = $(@bind mu_test Slider(100:1.0:1000,default=200,show_value=true))"
 
 # ╔═╡ 71ee6058-63f1-4602-a0d8-84c701175490
-md" σ = $(@bind sigma_test Slider(1:1000,default=20,show_value=true))"
+md" σ = $(@bind sigma_test Slider(1:0.1:1000,default=20,show_value=true))"
 
 # ╔═╡ 34d442b9-bdf5-4a0a-a0de-baadd468d358
 md" a = $(@bind a_test Slider(0.001:0.001:1,default=1e-2,show_value=true))"
 
+# ╔═╡ a3f2946d-3835-41c5-b41f-52bb62909d55
+md" b = $(@bind b_test Slider(0.001:0.001:15,default=1e-2,show_value=true))"
+
 # ╔═╡ e488c1a4-4a2f-4255-af2b-f5e47c354e1a
-plot(test_data[:,1],f_g(mu_test,sigma_test,a_test).(test_data[:,1]),label="μ=$(mu_test),σ=$(sigma_test)")
+begin 
+	if any(test_peak_type .== (PeaksSeparation.f_gauss,PeaksSeparation.f_lorentz))
+		test_peak_fun(x) = test_peak_type(x,mu_test,sigma_test,a_test)
+	else
+		test_peak_fun(x) = test_peak_type(x,mu_test,sigma_test,a_test,b_test)
+	end
+plot(test_data[:,1],test_peak_fun.(test_data[:,1]),label="μ=$(mu_test),σ=$(sigma_test)")
+end
 
 # ╔═╡ a47c7a06-c233-4550-aa5b-7fd0935d187d
 begin
@@ -208,14 +224,18 @@ Optimizer: $(Child(:optimizer,
 			Select([NelderMead=>"Nelder-Mead", 
 					ParticleSwarm=>"ParticleSwarm",
 					SimulatedAnnealing=>
-					"SimulatedAnnealing",LBFGS=>"LBFGS"],
+					"SimulatedAnnealing",
+					LBFGS=>"LBFGS",
+					NewtonTrustRegion=>"NewtonTrustRegion"],
 				default = def(:optimizer,ParticleSwarm))))
 
 Baseline type: $(Child(:baselineType, Select( [ConstantBaseLine=>"const",
 	LinearBaseLine=>"linear", QuadraticBaseLine=>"quadratic", CubicBaseLine=> "cubic"],default = LinearBaseLine)))
 	
 Peaks type: $(Child(:peaksType, Select([ GaussPeak => "Gaussian",
-					 LorentzPeak => "Lorentzian", VoigtPeak=>"Voigt"
+					 LorentzPeak => "Lorentzian", 
+					 VoigtPeak=>"Voigt",
+					 WeibullPeak=>"Weibull"	
 					],default= VoigtPeak))				)
 	
 Number of swarm reruns : $(Child(:try_num,Select(1:20,default=def(:try_num,10))
@@ -240,6 +260,18 @@ $(Child( :allow_negative_basline,CheckBox(default=false)))
 	"""
 end,label="Start fitting")
 
+# ╔═╡ dc094348-9514-4489-a278-1fa675d0bcbc
+md"""
+	Select optimizer for additional fit: $(@bind ReOptimizer 
+			Select([NelderMead=>"Nelder-Mead", 
+					ParticleSwarm=>"ParticleSwarm",
+					SimulatedAnnealing=>
+					"SimulatedAnnealing",
+					LBFGS=>"LBFGS",
+					NewtonTrustRegion=>"NewtonTrustRegion"],
+				default = def(:optimizer,ParticleSwarm)))
+	"""
+
 # ╔═╡ 66d7aa55-3959-4279-a5c7-ffff4a398875
 begin 
 	if x_coord_name!=y_coord_name
@@ -253,6 +285,7 @@ begin
 		is_nm = UU.optimizer==NelderMead
 		is_cons = is_swarm || !is_nm && UU.use_constraints
 		trial_vect = Vector{MultiPeaks}()
+		sol_vector = []
 		m = nothing
 		if !isassigned(sol_c) || !refit_previous
 			if (is_swarm || is_annealing) && (UU.try_num !=1)
@@ -265,8 +298,10 @@ begin
 									 allow_negative_peaks_amplitude = UU.allow_endo,
 									 allow_negative_baseline_tangent = UU.allow_negative_basline)
 					push!(trial_vect,m)
+					push!(sol_vector,s)
 				end
-				m = argmin(p->sqrt(sum(t->^(t,2),p.r)),trial_vect)
+				(ith,m) = argmin(p->sqrt(sum(t->^(t,2),p[2].r)),enumerate(trial_vect))
+				s = sol_vector[ith]
 			else
 				(s,m) = fit_peaks(x_data,y_data,N=N_peaks,
 								  use_constraints=is_cons,
@@ -279,7 +314,7 @@ begin
 			sol_c[] = m
 		else
 			m = sol_c[]
-			fit_peaks!(m;optimizer = LBFGS(),use_constraints=is_cons)
+			(s,) = fit_peaks!(m; optimizer = ReOptimizer(),use_constraints=false)
 		end
 		refit
 		m_stat = PeaksSeparation.statistics(m)
@@ -329,6 +364,12 @@ begin
 		p_res
 	end
 end
+
+# ╔═╡ 410c7d40-5b01-4841-9139-123f8657e43e
+s.stats
+
+# ╔═╡ b792db47-bad3-4ec4-ba0f-857bb5db0f19
+s.alg
 
 # ╔═╡ 3bbbdc7d-47e6-4b09-9bae-305bd7d60e5f
 if !isempty(trial_vect)
@@ -2361,10 +2402,12 @@ version = "1.8.1+0"
 # ╠═b37565fd-041d-4661-b1b3-81f6f5b8ea06
 # ╠═7c0eb1de-e9df-4829-8b8a-a5ba25e9cde6
 # ╠═699e56fd-ff6f-4361-a822-7779942616db
+# ╟─b80397a4-946b-40ab-866f-475c3e9e0efa
 # ╟─e488c1a4-4a2f-4255-af2b-f5e47c354e1a
 # ╟─91f65aa7-7692-4299-9575-d9fded0797a4
-# ╠═71ee6058-63f1-4602-a0d8-84c701175490
+# ╟─71ee6058-63f1-4602-a0d8-84c701175490
 # ╟─34d442b9-bdf5-4a0a-a0de-baadd468d358
+# ╠═a3f2946d-3835-41c5-b41f-52bb62909d55
 # ╟─a47c7a06-c233-4550-aa5b-7fd0935d187d
 # ╟─bf8f78ff-3eb6-4ec0-84db-59d0b7387236
 # ╠═a19b8338-4215-41b2-ab5e-d32041042300
@@ -2390,15 +2433,18 @@ version = "1.8.1+0"
 # ╟─522acdd4-5dfd-4827-a063-2fbfd8c0d000
 # ╟─ab595c5b-9bba-470d-88a6-a5d3d4186dad
 # ╟─8836e046-7daa-4117-ad2e-289a57b2286b
+# ╟─dc094348-9514-4489-a278-1fa675d0bcbc
 # ╟─eb08b226-e156-436e-b6ee-0ef7aaa94074
-# ╟─66d7aa55-3959-4279-a5c7-ffff4a398875
+# ╠═66d7aa55-3959-4279-a5c7-ffff4a398875
+# ╠═410c7d40-5b01-4841-9139-123f8657e43e
+# ╠═b792db47-bad3-4ec4-ba0f-857bb5db0f19
 # ╟─3bbbdc7d-47e6-4b09-9bae-305bd7d60e5f
 # ╟─ae337f5e-ebb3-4ba8-87b3-307c132f58ac
 # ╟─0c23b19a-cf0f-4733-885b-9f08fe6dc850
 # ╟─fa7041ad-ace6-432c-9b2d-9568aeaafef5
 # ╟─3622d9d0-3651-4d0d-9a35-0c173bca31c1
-# ╠═985e4fa6-dcb8-4f30-91c5-941234d84dad
-# ╠═3df51a84-4cae-485e-9038-558ac9fdaf0d
-# ╠═94647f04-a54c-4722-bee3-c26eb2337cf3
+# ╟─985e4fa6-dcb8-4f30-91c5-941234d84dad
+# ╟─3df51a84-4cae-485e-9038-558ac9fdaf0d
+# ╟─94647f04-a54c-4722-bee3-c26eb2337cf3
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

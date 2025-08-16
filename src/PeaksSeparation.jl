@@ -14,7 +14,8 @@ module PeaksSeparation
             ConstantBaseLine,
             LinearBaseLine,
             QuadraticBaseLine,
-            CubicBaseLine
+            CubicBaseLine,
+            WeibullPeak
 
     const default_optimizer = Ref(ParticleSwarm(n_particles=100))
     const fwhm = 2*sqrt(2*log(2.0)) # contant to evaluate the dispersion of Gaussian from peaks's fwhm
@@ -38,17 +39,36 @@ module PeaksSeparation
         return (dfdmu, dfdmu*(x-μ)/σ ,dfda )
     end
 
-    f_voigt(x,μ,σ,a,l_frac) = f_gauss(x,μ,σ,a)*(1-l_frac) + f_lorentz(x,μ,σ,a)*l_frac
-    function ∇voigt(x,μ,σ,a,l_frac) 
+    f_voigt(x,μ,σ,a,b) = f_gauss(x,μ,σ,a)*(1-b) + f_lorentz(x,μ,σ,a)*b
+    function ∇voigt(x,μ,σ,a,b) 
         abs(σ) > 1e-16 || (σ = 1e-16) 
         fl1 = f_lorentz(x, μ, σ, 1.0) 
         fg1 = f_gauss(x, μ, σ, 1.0) 
-        dfdmu = a * (x - μ) * (fg1 * (1 - l_frac)  + 2 * l_frac * fl1^2) /( σ^2 )
+        dfdmu = a * (x - μ) * (fg1 * (1 - b)  + 2 * b * fl1^2) /( σ^2 )
         return (dfdmu, 
                 dfdmu*(x-μ)/σ, #dfds
-                fg1 * (1 - l_frac) + fl1 * l_frac, #dfda
-                a*(fl1 - fg1) # dfdl 
+                fg1 * (1 - b) + fl1 * b, #dfda
+                a*(fl1 - fg1) # dfdb 
                 )
+    end
+
+    function f_weibull(x,μ,σ,a,b)
+      (x - μ) > 0 || return 0.0
+      return  abs( σ ) > 1e-16 ? a * ^((x - μ)/σ, b - 1) * exp(- ^((x - μ)/σ , b) ) : a*^(1e16*(x - μ), b - 1)*exp(- ^( 1e16*(x-μ) ,b) ) 
+    end
+    function ∇weibull(x,mu,s,a,b)
+        #error("Gradient is under construction")
+        (x - mu) > 0 || return (0.0,0.0,0.0,0.0)
+        x_sn = (x - mu)/s
+        x_b = x_sn^(b - 1)
+        e_b = exp(- x_sn^b )*x_b
+        dfdmu = a * e_b * (b * x_b  - (b - 1)/x_sn)/s
+        (
+            dfdmu,
+            (x - mu) * dfdmu/s,
+            e_b,
+            a*log(x_sn) * e_b * ( 1 -  x_sn * x_b)
+        )
     end
     # N - is the number of parameters of this component
     abstract type AbstractCurveComponent{N} end
@@ -193,24 +213,26 @@ for i in 1:5 # reserving function for up to five
         end
    end
    #pseudo-voigt peak
-   mutable struct VoigtPeak <:AbstractPeak{4}
-    parameters::NTuple{4,Float64}
-    names::NTuple{4,Symbol}
-    flags::NTuple{4,Bool}
-    index::Int
-        VoigtPeak(i::Int=1,mu=0.0,sigma=1.0,a=1.0,l_frac=0.5) = begin 
-            new((mu,sigma,a,l_frac),(:μ,:σ,:a,:l_frac),(false,false,false,false),i)
+   for peak_name in (:VoigtPeak,:WeibullPeak)
+    @eval mutable struct $peak_name <:AbstractPeak{4}
+        parameters::NTuple{4,Float64}
+        names::NTuple{4,Symbol}
+        flags::NTuple{4,Bool}
+        index::Int
+            $peak_name(i::Int=1,mu=0.0,sigma=1.0,a=1.0,b=0.5) = begin 
+                new((mu,sigma,a,b),(:μ,:σ,:a,:b),(false,false,false,false),i)
+            end
         end
     end
     # generating functions and gradients
-   for (peak_name,f_name,grad_name) in zip((:GaussPeak,:LorentzPeak,:VoigtPeak),
-                            (:f_gauss,:f_lorentz,:f_voigt),
-                            (:∇gauss,:∇lorentz,:∇voigt))
+   for (peak_name,f_name,grad_name) in zip((:GaussPeak,:LorentzPeak,:VoigtPeak,WeibullPeak),
+                            (:f_gauss, :f_lorentz, :f_voigt, :f_weibull),
+                            (:∇gauss,  :∇lorentz , :∇voigt, :∇weibull))
         #parnmb = parnumber(eval(peak_name))
         @eval (p::$peak_name)(x::T) where T= $f_name(x,getfield(p,:parameters)...)::T
         @eval ∇(x,p::$peak_name)= $grad_name(x,getfield(p,:parameters)...)
    end
-   is_has_gradient(::Type{P}) where P <: AbstractPeak = P<:GaussPeak || P<:LorentzPeak || P<: VoigtPeak
+   is_has_gradient(::Type{P}) where P <: AbstractPeak = P<:GaussPeak || P<:LorentzPeak || P<: VoigtPeak || P<: WeibullPeak
    is_has_gradient(::P) where P<:AbstractPeak = is_has_gradient(P)
    is_has_hessian(::Type{P}) where P<:AbstractPeak = false
    is_has_hessian(::AbstractPeak) = false
@@ -366,6 +388,26 @@ function grad!(g::AbstractVector, x ,mp::MultiPeaks{N,B,P}) where {N,B,P}
         end
     end
 
+function hess!(h, x, mp::MultiPeaks{N,B,P}) where {N,B,P}
+        !is_new_params(x,mp) || fill_pars!(mp,x) 
+        npoints = length(mp.x)
+        npars = parnumber(mp)
+        if is_has_gradient(P)
+            grad_fill! = (g,x) -> fill_from_tuples!(g,∇(x,1.0,mp)) 
+        else # if gradient is not provided 
+            #   TBW
+ #           grad_fill! = (g,x) -> copyto!(g, ForwardDiff.gradient())
+        end
+        J = Matrix{Float64}(undef,npoints,npars)
+        #H = Matrix{Float64}(undef,npars,npars)
+        for (i,xi) in enumerate(mp.x)
+            ji = @view J[i,:]
+            grad_fill!(ji,xi)
+        end
+        # calculating the approximate hessian J'*J
+        mul!(h,transpose(J),J)
+        return nothing
+end    
  
     """
     fill_from_tuples!(v,  args::Vararg;resizable::Bool=false)
@@ -440,6 +482,7 @@ the number of peaks is specified by N
 function param_estimate(T::Type{<:AbstractPeak},x,y,N::Union{Int,Nothing})  throw(DomainError("Undefined for $(T)")) end
 param_estimate(T::Type{<:Union{GaussPeak,LorentzPeak}},x,y,N::Union{Int,Nothing}) = param_estimate(T,x,y,maxima_indices(y,N))
 param_estimate(::Type{VoigtPeak},x,y,N::Union{Int,Nothing}) = (param_estimate(GaussPeak,x,y,maxima_indices(y,N))...,0.5)
+param_estimate(::Type{WeibullPeak},x,y,N::Union{Int,Nothing}) = (param_estimate(GaussPeak,x,y,maxima_indices(y,N))...,1.0)
     
     """
     fill_starting_vector!(starting_vector,mp::MultiPeaks{PeakNum,BaseType,PeakType}) where {PeakNum,BaseType,PeakType}
@@ -527,7 +570,7 @@ function fit_peaks(x::T,y::T ;
             starting = starting_vector
         end
         fill_pars!(p,starting)
-        optim_fun = OptimizationFunction(discr,grad=grad!) #AutoFiniteDiff()
+        optim_fun = OptimizationFunction(discr,grad=grad!,hess = hess!) #AutoFiniteDiff()
         
         if use_constraints
             box = box_constraints(p,
@@ -648,7 +691,8 @@ Evaluates box constraints on the peaks parameters
 function box_constraints(p::MultiPeaks{N,B,P};
             constraints_expansion::Float64=1.0,
             allow_negative_peaks_amplitude::Bool=true,
-            allow_negative_baseline_tangent::Bool=true) where {N,B,P<:Union{GaussPeak,LorentzPeak,VoigtPeak}}
+            allow_negative_baseline_tangent::Bool=true) where {N,B,P<:Union{GaussPeak,
+                                                                LorentzPeak,VoigtPeak,WeibullPeak}}
         # method calculates box constraints 
         # of the feasible region (dumb version)
         npars = parnumber(p) # total parameters number in all peaks
@@ -676,6 +720,9 @@ function box_constraints(p::MultiPeaks{N,B,P};
         if P<:VoigtPeak
             filler_fun_lower = _->(mu_bnds[1],s_bnds[1],a_bnds[1],0.0)
             filler_fun_upper = _->(mu_bnds[2],s_bnds[2],a_bnds[2],1.0)
+        elseif P<:WeibullPeak
+            filler_fun_lower = _->(mu_bnds[1],s_bnds[1],a_bnds[1],0.0)
+            filler_fun_upper = _->(mu_bnds[2],s_bnds[2],a_bnds[2],10.0)
         else
             filler_fun_lower = _->(mu_bnds[1],s_bnds[1],a_bnds[1])
             filler_fun_upper = _->(mu_bnds[2],s_bnds[2],a_bnds[2])
