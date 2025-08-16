@@ -13,6 +13,7 @@ Supported peaks types:
 - Gaussian
 - Lorentzian
 - Pseudo-Voigt
+- Weibull
 
 Supported baseline shapes:
 
