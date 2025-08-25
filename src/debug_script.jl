@@ -1,5 +1,5 @@
 using Plots,BenchmarkTools,Peaks,Optimization,CSV,DataFrames,OptimizationOptimJL,ForwardDiff
-using Profile
+using Profile,Revise
 includet("PeaksSeparation.jl")
 
 f(x,μ,σ,a) = exp(- 0.5* ^(x-μ,2)/(σ^2))*a
@@ -28,6 +28,7 @@ end
 Profile.print() 
 f_1() = 2+2
 @profile f_1()
+#testing data generation
 begin
     
     N=300
@@ -122,16 +123,38 @@ for (i,name) in enumerate((:A,:B,:C))
     end
 end
 
-(sol,p) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)
-plot(p)
-mp = [p,p,p]
-p[1]
-p[2]
-p[3]
-PeaksSeparation.peaks_distance(p[1],p[3])
 
-dm = PeaksSeparation.distance_matrix([p[1],p[2],p[3]])
+#evaluating distnce and peak clustering 
+begin 
+    (sol,p1) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)#,PeakType=PeaksSeparation.LorentzPeak)
+    @show sol
+    (sol,p2) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)#,PeakType=PeaksSeparation.VoigtPeak)
+    @show sol
+    (sol,p3) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)
+    @show sol
+    mp = [p1,p2,p3]
 
-fun1(args::PeaksSeparation.AbstractPeak...) = sum(PeaksSeparation.parnumber,args)
+end;
+fig = plot(p1)
+for p_i in mp
+    plot!(p_i)
+end
+fig
+pks = PeaksSeparation.collect_peaks(mp)
+@code_warntype PeaksSeparation.collect_peaks(mp)
 
-fun1(PeaksSeparation.GaussPeak(),PeaksSeparation.LorentzPeak(),PeaksSeparation.VoigtPeak())
+distance_mat = PeaksSeparation.distance_matrix(pks)
+pks[4]
+PeaksSeparation.peaks_distance(pks[4],pks[6])
+
+using Clustering
+result = kmeans(distance_mat, 3)
+
+println("Cluster assignments: ", assignments(result))
+println("Cluster centers: ", result.centers)
+# to limit the size of cluster to a specified number of elelments there is a python package
+grouped = PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=true)
+grouped[3]
+using BenchmarkTools
+@benchmark PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=false)
+@benchmark PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=true)
