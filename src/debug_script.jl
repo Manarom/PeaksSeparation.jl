@@ -1,6 +1,6 @@
 using Plots,BenchmarkTools,Peaks,Optimization,CSV,DataFrames,OptimizationOptimJL,ForwardDiff
 using Profile
-include("PeaksSeparation.jl")
+includet("PeaksSeparation.jl")
 
 f(x,μ,σ,a) = exp(- 0.5* ^(x-μ,2)/(σ^2))*a
 f_g(μ,σ,a) = x->f(x,μ,σ,a)
@@ -121,3 +121,17 @@ for (i,name) in enumerate((:A,:B,:C))
         end
     end
 end
+
+(sol,p) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)
+plot(p)
+mp = [p,p,p]
+p[1]
+p[2]
+p[3]
+PeaksSeparation.peaks_distance(p[1],p[3])
+
+dm = PeaksSeparation.distance_matrix([p[1],p[2],p[3]])
+
+fun1(args::PeaksSeparation.AbstractPeak...) = sum(PeaksSeparation.parnumber,args)
+
+fun1(PeaksSeparation.GaussPeak(),PeaksSeparation.LorentzPeak(),PeaksSeparation.VoigtPeak())

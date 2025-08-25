@@ -731,6 +731,21 @@ function box_constraints(p::MultiPeaks{N,B,P};
         fill_from_tuples!(_ub,ntuple(filler_fun_upper, Val(N)))
         return (lb=constraints_expansion*lb,ub=constraints_expansion*ub)
     end
+    function distance_matrix(p_vect::AbstractVector)
+        total_peaks_number = length(p_vect)#sum(peaknumber,mp)
+        distance_mat = Matrix{Float64}(undef,total_peaks_number,total_peaks_number)
+        for j in 1:total_peaks_number  # Iterate columns
+            for i in 1:j # Iterate rows up to the current column
+                distance_mat[i, j] = peaks_distance(p_vect[i],p_vect[j])[1]
+            end
+        end
+        return Symmetric(distance_mat)
+    end
+    function collect_peaks(multipeaks_collection)
+        for mp in multipeaks_collection
+            
+        end
+    end
     #plot recipe
    include("PlotRecipes.jl")
 
