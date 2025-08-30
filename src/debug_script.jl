@@ -126,13 +126,13 @@ end
 
 #evaluating distnce and peak clustering 
 begin 
-    (sol,p1) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)#,PeakType=PeaksSeparation.LorentzPeak)
+    (sol,p1) = PeaksSeparation.fit_peaks(x,y,optimizer = LBFGS(),N=3,PeakType=PeaksSeparation.LorentzPeak)
     @show sol
-    (sol,p2) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)#,PeakType=PeaksSeparation.VoigtPeak)
+    (sol,p2) = PeaksSeparation.fit_peaks(x,y,optimizer = LBFGS(),N=3)
     @show sol
-    (sol,p3) = PeaksSeparation.fit_peaks(x,y,optimizer = ParticleSwarm(),N=3,use_constraints=true)
+    (sol,p3) = PeaksSeparation.fit_peaks(x,y,optimizer = LBFGS(),N=3) 
     @show sol
-    mp = [p1,p2,p3]
+    mp = [p1,p2,p3,p1]
 
 end;
 fig = plot(p1)
@@ -140,10 +140,8 @@ for p_i in mp
     plot!(p_i)
 end
 fig
-pks = PeaksSeparation.collect_peaks(mp)
 @code_warntype PeaksSeparation.collect_peaks(mp)
 
-distance_mat = PeaksSeparation.distance_matrix(pks)
 pks[4]
 PeaksSeparation.peaks_distance(pks[4],pks[6])
 
@@ -153,8 +151,10 @@ result = kmeans(distance_mat, 3)
 println("Cluster assignments: ", assignments(result))
 println("Cluster centers: ", result.centers)
 # to limit the size of cluster to a specified number of elelments there is a python package
-grouped = PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=true)
-grouped[3]
+grouped = PeaksSeparation.cluster_peaks_collection(mp, use_clusterization=false)
+grouped[1]
+grouped_clust = PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=true)
+grouped[1]
 using BenchmarkTools
 @benchmark PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=false)
 @benchmark PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=true)

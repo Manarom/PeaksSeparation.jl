@@ -796,21 +796,22 @@ all peaks attributed to the cluster
 is equal to the number of peaks in each 
 if `use_clusterization` is true than `kmeans` method  is used 
 """
-function cluster_peaks_collection(multipeaks_collection;use_clusterization::Bool=false)
-        peaks_vector =  collect_peaks(multipeaks_collection)
-        cluster_number = peaknumber(first(multipeaks_collection)) 
-        distance_mat = distance_matrix(peaks_vector)
+function cluster_peaks_collection(multipeaks_collection; use_clusterization::Bool=false)
+        cluster_number = peaknumber(first(multipeaks_collection)) # total number of clusters must be equal to the number of peaks in each peaks collection 
+        peaks_vector = multipeaks_collection |> collect_peaks
         if use_clusterization
-            result = kmeans(distance_mat, cluster_number)
-            inds = assignments(result)
+            inds = peaks_vector  |> distance_matrix |> x->kmeans(x,cluster_number) |> assignments
         else
-            peaks_per_cluster = length(multipeaks_collection)
-            inds = similar(peaks_vector,Int)
+            elements_in_cluster = length(multipeaks_collection)
+            inds = similar(peaks_vector,Int) # vector of indices, each index correspond to peak index in peaks_vector
             for i in 1:cluster_number
-                #inds[i] = i
-                _c = @view distance_mat[:,i]
-                _inds = @view inds[ partialsortperm(_c,1:peaks_per_cluster)]
-                fill!(_inds,i)
+                inds[i] = i
+                p_cur = multipeaks_collection[1][i]
+                for j in 2:elements_in_cluster
+                    (_,ind_prox) = findmin(p_i->peaks_distance(p_cur,p_i)[1],multipeaks_collection[j].peaks)
+                    ind_prox += (j-1)*cluster_number
+                    inds[ind_prox] = i
+                end
             end
         end
         return ntuple(i->view(peaks_vector,inds .==i),cluster_number)
