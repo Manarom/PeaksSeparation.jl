@@ -808,6 +808,8 @@ function cluster_peaks_collection(multipeaks_collection; use_clusterization::Boo
                 inds[i] = i
                 p_cur = multipeaks_collection[1][i]
                 for j in 2:elements_in_cluster
+                    # finding peaks, that has a minimal distance from p_cur from 
+                    # in all other multipeaks_collection elements
                     (_,ind_prox) = findmin(p_i->peaks_distance(p_cur,p_i)[1],multipeaks_collection[j].peaks)
                     ind_prox += (j-1)*cluster_number
                     inds[ind_prox] = i
