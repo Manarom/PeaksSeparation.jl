@@ -1,6 +1,6 @@
 using Plots,BenchmarkTools,Peaks,Optimization,CSV,DataFrames,OptimizationOptimJL,ForwardDiff
-using Profile
-include("PeaksSeparation.jl")
+using Profile,Revise
+includet("PeaksSeparation.jl")
 
 f(x,μ,σ,a) = exp(- 0.5* ^(x-μ,2)/(σ^2))*a
 f_g(μ,σ,a) = x->f(x,μ,σ,a)
@@ -28,6 +28,7 @@ end
 Profile.print() 
 f_1() = 2+2
 @profile f_1()
+#testing data generation
 begin
     
     N=300
@@ -121,3 +122,39 @@ for (i,name) in enumerate((:A,:B,:C))
         end
     end
 end
+
+
+#evaluating distnce and peak clustering 
+begin 
+    (sol,p1) = PeaksSeparation.fit_peaks(x,y,optimizer = LBFGS(),N=3,PeakType=PeaksSeparation.LorentzPeak)
+    @show sol
+    (sol,p2) = PeaksSeparation.fit_peaks(x,y,optimizer = LBFGS(),N=3)
+    @show sol
+    (sol,p3) = PeaksSeparation.fit_peaks(x,y,optimizer = LBFGS(),N=3) 
+    @show sol
+    mp = [p1,p2,p3,p1]
+
+end;
+fig = plot(p1)
+for p_i in mp
+    plot!(p_i)
+end
+fig
+@code_warntype PeaksSeparation.collect_peaks(mp)
+
+pks[4]
+PeaksSeparation.peaks_distance(pks[4],pks[6])
+
+using Clustering
+result = kmeans(distance_mat, 3)
+
+println("Cluster assignments: ", assignments(result))
+println("Cluster centers: ", result.centers)
+# to limit the size of cluster to a specified number of elelments there is a python package
+grouped = PeaksSeparation.cluster_peaks_collection(mp, use_clusterization=false)
+grouped[1]
+grouped_clust = PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=true)
+grouped[1]
+using BenchmarkTools
+@benchmark PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=false)
+@benchmark PeaksSeparation.cluster_peaks_collection(mp,use_clusterization=true)

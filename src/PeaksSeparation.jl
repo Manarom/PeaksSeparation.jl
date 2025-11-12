@@ -2,7 +2,8 @@ module PeaksSeparation
     using Optimization, Peaks, StaticArrays,
         OptimizationOptimJL,ForwardDiff,RecipesBase,
         AllocCheck,Statistics,LinearAlgebra,
-        QuadGK
+        QuadGK,
+        Clustering
 
     export MultiPeaks,
             fit_peaks,
@@ -141,10 +142,13 @@ function peaks_distance(p1::T,p2::P) where {T<:AbstractCurveComponent,P<:Abstrac
         (f2_m,    e2) = out[3]
         e1 = e1^2
         e2 = e2^2
-        dist = f1_f2/(f1_m + f2_m) # integral Euclidean-like distance between functions
-        e = sqrt(sum(t->t^2,
+        f1_f2 !=0 || return (0.0, sqrt(sum(t->t^2,( e1_e2/(f1_m + f2_m) , (e1+e2)/^(f1_m + f2_m,2)))))
+        (f1_m + f2_m) != 0 || return (Inf, Inf)
+        
+        dist = f1_f2/(f1_m + f2_m)# integral Euclidean-like distance between functions
+        e = sqrt(sum(   t->t^2,
                         (e1_e2/(f1_m + f2_m) ,(e1+e2)/^(f1_m + f2_m,2)) # error estimation 
-                    )) # error estimation 
+                    ))
         return (dist, e)   
     end
     """
@@ -304,7 +308,7 @@ end
 Total number of parameters used to fit the curve 
 """
 parnumber(::MultiPeaks{N,B,P}) where {N,B,P} = parnumber(B)+ N*parnumber(P) # total parnumber of the curve 
-peaknumber(::MultiPeaks{N}) where N = N
+peaknumber(::MultiPeaks{N,B,P}) where {N,B,P}= N
 #
     """
     add_baseline!(mp::MultiPeaks)
@@ -598,6 +602,24 @@ function fit_peaks(x::T,y::T ;
         residual!(p)
         return (sol,p)
     end
+    function fit_peaks(x::T,y::T ;random_try_number::Int=10,kwargs...) where T
+        random_try_number > 1 || return fit_peaks(x,y;kwargs...)
+        (first_sol,first_fitter) = fit_peaks(x,y;kwargs...)
+        trial_vect = Vector{typeof(first_fitter)}()
+		sol_vector = Vector{typeof{first_fitter}}()
+        is_random_optimizer = isa(first_sol.alg,ParticleSwarm) # true if the optimizer itself has a random init
+
+        Threads.@threads for i in 1:random_try_number
+            (s,m) = fit_peaks(x_data,y_data;kwargs...)
+            push!(trial_vect,m)
+            push!(sol_vector,s)
+        end
+        (ith,m) = argmin(p->sqrt(sum(t->^(t,2),p[2].r)),enumerate(trial_vect))
+        s = sol_vector[ith]
+
+
+
+    end
     function check_bounds_on_starting_vector!(starting_vector,box)
         length(box.lb) == length(starting_vector) || resize!(starting_vector,length(box.lb))
         for (i,(lbi,si,ubi)) in enumerate(zip(box.lb,starting_vector,box.ub))
@@ -717,10 +739,10 @@ function box_constraints(p::MultiPeaks{N,B,P};
 
         _lb = @view lb[base_npars+1:npars]
         _ub = @view ub[base_npars+1:npars]
-        if P<:VoigtPeak
+        if P <: VoigtPeak
             filler_fun_lower = _->(mu_bnds[1],s_bnds[1],a_bnds[1],0.0)
             filler_fun_upper = _->(mu_bnds[2],s_bnds[2],a_bnds[2],1.0)
-        elseif P<:WeibullPeak
+        elseif P <: WeibullPeak
             filler_fun_lower = _->(mu_bnds[1],s_bnds[1],a_bnds[1],0.0)
             filler_fun_upper = _->(mu_bnds[2],s_bnds[2],a_bnds[2],10.0)
         else
@@ -730,6 +752,83 @@ function box_constraints(p::MultiPeaks{N,B,P};
         fill_from_tuples!(_lb,ntuple(filler_fun_lower, Val(N)))
         fill_from_tuples!(_ub,ntuple(filler_fun_upper, Val(N)))
         return (lb=constraints_expansion*lb,ub=constraints_expansion*ub)
+    end
+
+"""
+    generate_random_starting_vector(p::MultiPeaks{N,B,P};kwargs...) where {N,B,P<:Union{GaussPeak,
+                                                        LorentzPeak,VoigtPeak,WeibullPeak}}
+
+Generates random starting vector within the box constraint
+"""
+function generate_random_starting_vector(p::MultiPeaks{N,B,P};kwargs...) where {N,B,P<:Union{GaussPeak,
+                                                        LorentzPeak,VoigtPeak,WeibullPeak}}
+       box = box_constraints(p;kwargs...)
+
+end
+    """
+    distance_matrix(p_vect::AbstractVector)
+
+Evaluates distance matrix for the collection of peaks using [`peaks_distance`](@ref)
+function
+"""
+function distance_matrix(p_vect::AbstractVector)
+        total_peaks_number = length(p_vect)#sum(peaknumber,mp)
+        distance_mat = Matrix{Float64}(undef,total_peaks_number,total_peaks_number)
+        for j in 1:total_peaks_number  # Iterate columns
+            for i in 1:j # Iterate rows up to the current column
+                (d,_) = peaks_distance(p_vect[i],p_vect[j])
+                distance_mat[i, j] = d
+            end
+        end
+        return Symmetric(distance_mat)
+    end
+    """
+    cluster_peaks_collection(multipeaks_collection)
+This function can be used to clusterize the results of several curves fitting
+Each DSC curve is attributed to a particular heating rate
+
+Returns the tuple of peaks vector (<:AbstractPeak) views where each 
+view, each tuple element corresponds to the cluster and views contains 
+all peaks attributed to the cluster
+
+`multipeaks_collection` is an iterable collection of [`MultiPeaks`](@ref) objects,
+ all elements of this collection are supposed to have the same number of peaks, number of clusters 
+is equal to the number of peaks in each 
+if `use_clusterization` is true than `kmeans` method  is used 
+"""
+function cluster_peaks_collection(multipeaks_collection; use_clusterization::Bool=false)
+        cluster_number = peaknumber(first(multipeaks_collection)) # total number of clusters must be equal to the number of peaks in each peaks collection 
+        peaks_vector = multipeaks_collection |> collect_peaks
+        if use_clusterization
+            inds = peaks_vector  |> distance_matrix |> x->kmeans(x,cluster_number) |> assignments
+        else
+            elements_in_cluster = length(multipeaks_collection)
+            inds = similar(peaks_vector,Int) # vector of indices, each index correspond to peak index in peaks_vector
+            for i in 1:cluster_number
+                inds[i] = i
+                p_cur = multipeaks_collection[1][i]
+                for j in 2:elements_in_cluster
+                    # finding peaks, that has a minimal distance from p_cur from 
+                    # in all other multipeaks_collection elements
+                    (_,ind_prox) = findmin(p_i->peaks_distance(p_cur,p_i)[1],multipeaks_collection[j].peaks)
+                    ind_prox += (j-1)*cluster_number
+                    inds[ind_prox] = i
+                end
+            end
+        end
+        return ntuple(i->view(peaks_vector,inds .==i),cluster_number)
+    end
+    function collect_peaks(multipeaks_collection)
+        total_peaks_number = sum(peaknumber,multipeaks_collection)
+        counter = 1
+        out = Vector{AbstractPeak}(undef,total_peaks_number)
+        for mp in multipeaks_collection
+            p_i = peaknumber(mp)
+            _o = @view out[counter : counter + p_i - 1]
+            counter = counter + p_i
+            copyto!(_o,getfield(mp,:peaks))
+        end
+        return out
     end
     #plot recipe
    include("PlotRecipes.jl")

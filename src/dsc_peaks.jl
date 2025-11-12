@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.20.9
+# v0.20.20
 
 using Markdown
 using InteractiveUtils
@@ -20,7 +20,7 @@ end
 using CSV,Peaks,Plots,PlutoUI,Optimization,OptimizationOptimJL,Revise,StaticArrays,ForwardDiff,RecipesBase,DataFrames, AllocCheck
 
 # ╔═╡ fa30f47d-fe9c-4308-a46c-b85b4ee61beb
-using LinearAlgebra,Statistics,QuadGK
+using LinearAlgebra,Statistics,QuadGK, Clustering
 
 # ╔═╡ b37565fd-041d-4661-b1b3-81f6f5b8ea06
 using Main.PeaksSeparation, Main.NetzFileParser
@@ -422,6 +422,7 @@ PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 AllocCheck = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+Clustering = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -439,6 +440,7 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 [compat]
 AllocCheck = "~0.2.2"
 CSV = "~0.10.15"
+Clustering = "~0.15.8"
 DataFrames = "~1.7.0"
 ForwardDiff = "~1.0.1"
 Optimization = "~4.3.0"
@@ -458,7 +460,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "5eb555c5ac41eae1ba30b53f1ca90825df8a4a4a"
+project_hash = "6bb7ffd6b096b0c4ef67179b7df5cbdf853c8894"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "e2478490447631aedba0823d4d7a80b2cc8cdb32"
@@ -604,6 +606,12 @@ deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jl
 git-tree-sha1 = "fde3bf89aead2e723284a8ff9cdf5b551ed700e8"
 uuid = "83423d85-b0ee-5818-9007-b63ccbeb887a"
 version = "1.18.5+0"
+
+[[deps.Clustering]]
+deps = ["Distances", "LinearAlgebra", "NearestNeighbors", "Printf", "Random", "SparseArrays", "Statistics", "StatsBase"]
+git-tree-sha1 = "3e22db924e2945282e70c33b75d4dde8bfa44c94"
+uuid = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
+version = "0.15.8"
 
 [[deps.CodeTracking]]
 deps = ["InteractiveUtils", "UUIDs"]
@@ -821,6 +829,20 @@ version = "0.7.1"
     Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
     Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
     Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
+[[deps.Distances]]
+deps = ["LinearAlgebra", "Statistics", "StatsAPI"]
+git-tree-sha1 = "c7e3a542b999843086e2f29dac96a618c105be1d"
+uuid = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
+version = "0.10.12"
+
+    [deps.Distances.extensions]
+    DistancesChainRulesCoreExt = "ChainRulesCore"
+    DistancesSparseArraysExt = "SparseArrays"
+
+    [deps.Distances.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [[deps.Distributed]]
 deps = ["Random", "Serialization", "Sockets"]
@@ -1413,6 +1435,12 @@ deps = ["OpenLibm_jll"]
 git-tree-sha1 = "9b8215b1ee9e78a293f99797cd31375471b2bcae"
 uuid = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
 version = "1.1.3"
+
+[[deps.NearestNeighbors]]
+deps = ["Distances", "StaticArrays"]
+git-tree-sha1 = "ca7e18198a166a1f3eb92a3650d53d94ed8ca8a1"
+uuid = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
+version = "0.4.22"
 
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
@@ -2435,7 +2463,7 @@ version = "1.8.1+0"
 # ╟─8836e046-7daa-4117-ad2e-289a57b2286b
 # ╟─dc094348-9514-4489-a278-1fa675d0bcbc
 # ╟─eb08b226-e156-436e-b6ee-0ef7aaa94074
-# ╠═66d7aa55-3959-4279-a5c7-ffff4a398875
+# ╟─66d7aa55-3959-4279-a5c7-ffff4a398875
 # ╠═410c7d40-5b01-4841-9139-123f8657e43e
 # ╠═b792db47-bad3-4ec4-ba0f-857bb5db0f19
 # ╟─3bbbdc7d-47e6-4b09-9bae-305bd7d60e5f
